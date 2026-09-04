@@ -173,41 +173,54 @@
                     <line x1="16" y1="6" x2="16" y2="22"/>
                   </svg>
                   <div class="map-titles">
-                    <h2 class="map-main-title">Regional Air Quality Radar</h2>
-                    <span class="map-subtitle" id="mapLocationSubtitle">Live monitoring stations & dispersion plume</span>
+                    <h2 class="map-main-title">Air Quality Radar</h2>
+                    <span class="map-subtitle" id="mapLocationSubtitle">Live MSN Weather Map & CPCB Grid</span>
                   </div>
                 </div>
-                <div class="map-status-pill" id="mapStatusPill">
-                  <span class="pulse-dot"></span>
-                  <span id="mapZoomLevel">Zoom 10</span>
+                <div class="map-header-actions">
+                  <div class="map-toggle-pill">
+                    <button class="map-mode-btn active" id="btnModeMsn" data-mode="msn">MSN Map</button>
+                    <button class="map-mode-btn" id="btnModeRadar" data-mode="radar">Stations</button>
+                  </div>
+                  <a href="https://www.msn.com/en-in/weather/maps/airquality?zoom=10" target="_blank" rel="noopener noreferrer" class="msn-link-btn" id="msnExternalLink" title="Open full interactive map on MSN Weather in new tab">
+                    <span>MSN ↗</span>
+                  </a>
                 </div>
               </div>
 
               <div class="aqi-map-card">
-                <div id="airQualityLeafletMap" class="aqi-leaflet-container"></div>
-                
-                <!-- Floating Apple Glass Controls -->
-                <div class="map-floating-controls">
-                  <button class="map-control-btn" id="mapRecenterBtn" title="Center on My Location">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>
-                  </button>
-                  <div class="map-zoom-pill">
-                    <button class="map-zoom-btn" id="mapZoomInBtn" title="Zoom In">+</button>
-                    <div class="map-zoom-divider"></div>
-                    <button class="map-zoom-btn" id="mapZoomOutBtn" title="Zoom Out">−</button>
-                  </div>
+                <!-- MSN Weather Live Iframe Map (Primary) -->
+                <div id="msnMapWrapper" class="msn-map-wrapper">
+                  <iframe id="msnMapFrame" src="/api/msn-map?zoom=10" class="msn-map-iframe" title="MSN Weather Air Quality Map" loading="lazy" allow="geolocation"></iframe>
                 </div>
 
-                <!-- Selected Station Interactive Banner Callout -->
-                <div class="map-station-banner" id="mapStationBanner" style="display: none;">
-                  <div class="banner-left">
-                    <span class="station-tag" id="bannerStationName">Mandir Marg, Delhi</span>
-                    <span class="station-meta" id="bannerStationMeta">2.7 km away • DPCC Continuous</span>
+                <!-- CPCB Leaflet Stations Radar Map (Secondary Layer) -->
+                <div id="radarMapWrapper" class="radar-map-wrapper" style="display: none;">
+                  <div id="airQualityLeafletMap" class="aqi-leaflet-container"></div>
+                  
+                  <!-- Floating Apple Glass Controls -->
+                  <div class="map-floating-controls">
+                    <button class="map-control-btn" id="mapRecenterBtn" title="Center on My Location">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>
+                    </button>
+                    <div class="map-zoom-pill">
+                      <button class="map-zoom-btn" id="mapZoomInBtn" title="Zoom In">+</button>
+                      <div class="map-zoom-divider"></div>
+                      <button class="map-zoom-btn" id="mapZoomOutBtn" title="Zoom Out">−</button>
+                    </div>
                   </div>
-                  <div class="banner-right">
-                    <div class="banner-aqi-pill" id="bannerAqiPill">
-                      <span id="bannerAqiVal">184</span>
-                      <span class="banner-aqi-label" id="bannerAqiCat">Unhealthy</span>
+
+                  <!-- Selected Station Interactive Banner Callout -->
+                  <div class="map-station-banner" id="mapStationBanner" style="display: none;">
+                    <div class="banner-left">
+                      <span class="station-tag" id="bannerStationName">Mandir Marg, Delhi</span>
+                      <span class="station-meta" id="bannerStationMeta">2.7 km away • DPCC Continuous</span>
+                    </div>
+                    <div class="banner-right">
+                      <div class="banner-aqi-pill" id="bannerAqiPill">
+                        <span id="bannerAqiVal">184</span>
+                        <span class="banner-aqi-label" id="bannerAqiCat">Unhealthy</span>
+                      </div>
                     </div>
                   </div>
                 </div>

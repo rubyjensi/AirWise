@@ -36,3 +36,10 @@ def test_home_endpoint_structure():
     assert "hourly" in data
     assert len(data["hourly"]) > 0
     assert "disclaimer" in data
+
+def test_msn_map_proxy_endpoint():
+    response = client.get("/api/msn-map?zoom=10")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert response.headers.get("x-frame-options") == "ALLOWALL"
+    assert "weathermap" in response.text.lower() or "msn" in response.text.lower()

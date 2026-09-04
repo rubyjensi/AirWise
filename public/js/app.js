@@ -145,6 +145,34 @@ function getAqiHexColor(aqi) {
 function initAirQualityMap() {
   const mapContainer = document.getElementById('airQualityLeafletMap');
   if (!mapContainer || typeof L === 'undefined') return;
+
+  // MSN vs Radar Mode Toggle Switcher
+  const btnModeMsn = document.getElementById('btnModeMsn');
+  const btnModeRadar = document.getElementById('btnModeRadar');
+  const msnMapWrapper = document.getElementById('msnMapWrapper');
+  const radarMapWrapper = document.getElementById('radarMapWrapper');
+
+  if (btnModeMsn && btnModeRadar && msnMapWrapper && radarMapWrapper) {
+    btnModeMsn.onclick = (e) => {
+      e.stopPropagation();
+      btnModeMsn.classList.add('active');
+      btnModeRadar.classList.remove('active');
+      msnMapWrapper.style.display = 'block';
+      radarMapWrapper.style.display = 'none';
+    };
+
+    btnModeRadar.onclick = (e) => {
+      e.stopPropagation();
+      btnModeRadar.classList.add('active');
+      btnModeMsn.classList.remove('active');
+      msnMapWrapper.style.display = 'none';
+      radarMapWrapper.style.display = 'block';
+      if (leafletMap) {
+        setTimeout(() => leafletMap.invalidateSize(), 50);
+      }
+    };
+  }
+
   if (leafletMap) return;
 
   const lat = state.location?.lat || 28.6139;
@@ -181,13 +209,6 @@ function initAirQualityMap() {
     e.stopPropagation();
     if (leafletMap) leafletMap.zoomOut();
   });
-
-  leafletMap.on('zoomend', () => {
-    const zoomLevelEl = document.getElementById('mapZoomLevel');
-    if (zoomLevelEl && leafletMap) {
-      zoomLevelEl.textContent = `Zoom ${leafletMap.getZoom()}`;
-    }
-  });
 }
 
 function updateAirQualityMap(d) {
@@ -195,6 +216,20 @@ function updateAirQualityMap(d) {
   const lat = d.latitude;
   const lon = d.longitude;
   const aqi = d.air_quality.aqi;
+
+  // Update Live MSN Weather Map Iframe & Direct Link
+  const msnMapFrame = document.getElementById('msnMapFrame');
+  const msnExternalLink = document.getElementById('msnExternalLink');
+  const locKey = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+
+  if (msnMapFrame && msnMapFrame.getAttribute('data-loc') !== locKey) {
+    msnMapFrame.setAttribute('data-loc', locKey);
+    msnMapFrame.src = `/api/msn-map?zoom=10&lat=${lat}&lon=${lon}`;
+  }
+
+  if (msnExternalLink) {
+    msnExternalLink.href = `https://www.msn.com/en-in/weather/maps/airquality?zoom=10&lat=${lat}&lon=${lon}`;
+  }
 
   if (!leafletMap) {
     initAirQualityMap();

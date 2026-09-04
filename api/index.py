@@ -3,10 +3,12 @@ VayuGuard Main FastAPI Application
 Serves the unified /api/home endpoint, city searches, and mounts public static assets.
 """
 
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import FastAPI, Query, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
+import httpx
 from typing import Optional, List, Dict, Any
 
 from api.models import (
@@ -88,6 +90,123 @@ def search_places(q: str = Query(..., min_length=1)):
         if query in city["name"].lower() or query in city["state"].lower() or query in city["country"].lower():
             results.append(city)
     return {"query": q, "results": results[:6]}
+
+@app.get("/api/msn-map", response_class=HTMLResponse)
+@app.get("/msn-map", response_class=HTMLResponse)
+async def get_msn_map(
+    zoom: int = Query(default=10, ge=1, le=20),
+    lat: Optional[float] = Query(default=None),
+    lon: Optional[float] = Query(default=None)
+):
+    """
+    Reverse-proxies the live MSN Weather Air Quality map page.
+    Strips X-Frame-Options and frame-ancestors restrictions so the official
+    Microsoft weather map displays natively in the AirWise interface.
+    """
+    url = f"https://www.msn.com/en-in/weather/maps/airquality?zoom={zoom}"
+    if lat is not None and lon is not None:
+        url += f"&lat={lat}&lon={lon}"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-IN,en;q=0.9",
+        "Referer": "https://www.msn.com/",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            html = resp.text
+    except Exception:
+        fallback_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body {{ margin: 0; background: #0f141c; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; padding: 20px; box-sizing: border-box; }}
+  a {{ color: #0071e3; text-decoration: none; font-weight: 600; padding: 10px 18px; border-radius: 980px; background: rgba(0,113,227,0.15); border: 1px solid rgba(0,113,227,0.3); margin-top: 12px; display: inline-block; }}
+</style>
+</head>
+<body>
+  <h3 style="margin:0 0 8px;">MSN Weather Air Quality Map</h3>
+  <p style="color: rgba(255,255,255,0.6); max-width: 320px; font-size: 13px; margin: 0;">Interactive Bing Maps telemetry initializing.</p>
+  <a href="{url}" target="_blank" rel="noopener">Open Directly on MSN Weather &rarr;</a>
+</body>
+</html>"""
+        return HTMLResponse(
+            content=fallback_html,
+            status_code=200,
+            headers={"X-Frame-Options": "ALLOWALL", "Content-Security-Policy": "frame-ancestors *"}
+        )
+
+    # Inject base href if needed
+    if "<head>" in html:
+        html = html.replace("<head>", '<head>\n<base href="https://www.msn.com/">\n', 1)
+
+    # Inject CSS overrides to clean up MSN header/footer chrome and let map fill container
+    clean_css = """
+<style id="airwise-msn-cleaner">
+  header, #header, nav, #nav, #meganav-container, .header-container,
+  [class*="header"], [class*="navBar"], [class*="ad-"], [class*="footer"],
+  #footer, [class*="social"], [class*="feedback"], [id*="sidebar"],
+  .bing-weather-nav, .msn-header, .me-control, #header-container,
+  .search-box-container, .action-bar-container {
+    display: none !important;
+  }
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    background: #0d1117 !important;
+  }
+  #weathermap-2d-container {
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    position: fixed !important;
+    display: block !important;
+    z-index: 999 !important;
+  }
+</style>
+"""
+    if "</head>" in html:
+        html = html.replace("</head>", f"{clean_css}\n</head>", 1)
+    else:
+        html += clean_css
+
+    return HTMLResponse(
+        content=html,
+        status_code=200,
+        headers={
+            "X-Frame-Options": "ALLOWALL",
+            "Content-Security-Policy": "frame-ancestors *",
+            "Cache-Control": "public, max-age=300"
+        }
+    )
+
+@app.get("/api/bundles/{bundle_path:path}")
+@app.get("/bundles/{bundle_path:path}")
+async def proxy_msn_bundle(bundle_path: str):
+    """
+    Proxies MSN JS bundles so worker scripts and tile metadata load seamlessly.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"https://assets.msn.com/bundles/{bundle_path}")
+            return Response(
+                content=r.content,
+                status_code=r.status_code,
+                media_type=r.headers.get("content-type", "application/javascript"),
+                headers={"Cache-Control": "public, max-age=86400"}
+            )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Bundle not found")
 
 @app.get("/api/home", response_model=HomeResponse)
 @app.get("/home", response_model=HomeResponse)
