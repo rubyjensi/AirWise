@@ -47,11 +47,23 @@ export class MSNInteractiveStream {
       this.ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          if (data.type === 'error' || data.error) {
+            if (this.statusEl) {
+              this.statusEl.textContent = 'Map rendering failed';
+              this.statusEl.style.color = '#ff453a';
+            }
+            if (this.spinnerEl) {
+              this.spinnerEl.style.display = 'flex';
+              this.spinnerEl.innerHTML = `<span style="font-size: 13px; font-weight: 600; color: #ff453a;">Map rendering failed</span>`;
+            }
+            return;
+          }
           if (data.image) {
             this.imgEl.src = data.image;
             if (this.spinnerEl) this.spinnerEl.style.display = 'none';
-            if (data.timestamp && this.statusEl) {
-              const d = new Date(data.timestamp * 1000);
+            if (this.statusEl) {
+              this.statusEl.style.color = '';
+              const d = data.timestamp ? new Date(data.timestamp * 1000) : new Date();
               this.statusEl.textContent = `Live: ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
             }
           }
@@ -62,7 +74,10 @@ export class MSNInteractiveStream {
 
       this.ws.onclose = () => {
         this.isConnected = false;
-        if (this.statusEl) this.statusEl.textContent = 'Reconnecting…';
+        if (this.statusEl) {
+          this.statusEl.textContent = 'Reconnecting…';
+          this.statusEl.style.color = '';
+        }
         this.startHttpPolling();
         setTimeout(() => this.connect(), 4000);
       };
@@ -90,10 +105,26 @@ export class MSNInteractiveStream {
         const blob = await res.blob();
         this.imgEl.src = URL.createObjectURL(blob);
         if (this.spinnerEl) this.spinnerEl.style.display = 'none';
-        if (this.statusEl) this.statusEl.textContent = 'Live (HTTP)';
+        if (this.statusEl) {
+          this.statusEl.style.color = '';
+          this.statusEl.textContent = 'Live (HTTP)';
+        }
+      } else {
+        if (this.statusEl) {
+          this.statusEl.textContent = 'Map rendering failed';
+          this.statusEl.style.color = '#ff453a';
+        }
+        if (this.spinnerEl) {
+          this.spinnerEl.style.display = 'flex';
+          this.spinnerEl.innerHTML = `<span style="font-size: 13px; font-weight: 600; color: #ff453a;">Map rendering failed</span>`;
+        }
       }
     } catch (e) {
       console.warn('HTTP frame fetch error:', e);
+      if (this.statusEl) {
+        this.statusEl.textContent = 'Map rendering failed';
+        this.statusEl.style.color = '#ff453a';
+      }
     }
   }
 
@@ -119,9 +150,21 @@ export class MSNInteractiveStream {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) {
+          if (this.statusEl) {
+            this.statusEl.textContent = 'Map rendering failed';
+            this.statusEl.style.color = '#ff453a';
+          }
+          throw new Error(`HTTP error ${res.status}`);
+        }
+        return res.json();
+      })
       .then(resData => {
-        if (resData.image) this.imgEl.src = resData.image;
+        if (resData.image) {
+          this.imgEl.src = resData.image;
+          if (this.statusEl) this.statusEl.style.color = '';
+        }
         if (resData.timestamp && this.statusEl) {
           const d = new Date(resData.timestamp * 1000);
           this.statusEl.textContent = `Live: ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;

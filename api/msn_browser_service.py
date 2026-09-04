@@ -1,7 +1,7 @@
 """
 Playwright-based Headless Chromium Service for MSN Weather Air Quality Map.
-Runs MSN as the top-level main page (bypassing all iframe/frame-ancestor restrictions),
-captures frames, and forwards interactive user inputs (clicks, drags, wheel zoom).
+Runs MSN as the top-level main page with SwiftShader software WebGL rasterization,
+captures frames, validates map canvas health, and forwards user inputs.
 """
 
 import asyncio
@@ -16,10 +16,6 @@ from playwright.async_api import async_playwright, Playwright, Browser, BrowserC
 logger = logging.getLogger("airwise.msn_browser")
 
 CLEAN_MAP_CSS = """
-header, #header, nav, #nav, #meganav-container, .header-container,
-[class*="header"], [class*="navBar"], [class*="ad-"], [class*="footer"],
-#footer, [class*="social"], [class*="feedback"], [id*="sidebar"],
-.bing-weather-nav, .msn-header, .me-control, #header-container,
 #onetrust-consent-sdk, [id*="consent"], [class*="consent"], .cookie-banner, .onetrust-pc-dark-filter {
     display: none !important;
     visibility: hidden !important;
@@ -68,9 +64,36 @@ class MSNBrowserService:
         self.current_zoom = 10
         self.current_lat: Optional[float] = None
         self.current_lon: Optional[float] = None
+        self.last_health_status: Dict[str, Any] = {"ok": False, "status": "uninitialized"}
+
+    async def check_map_health(self) -> Dict[str, Any]:
+        """Validates that WebGL initialized and map canvas is actively rendering."""
+        if not self.page or self.page.is_closed():
+            return {"ok": False, "error": "Browser page not open"}
+        try:
+            status = await self.page.evaluate('''() => {
+                const bodyText = document.body.innerText || "";
+                if (bodyText.includes("WebGL error") || bodyText.includes("Failed to create map")) {
+                    return { ok: false, error: "Failed to create map due to a WebGL error" };
+                }
+                const canvas = document.querySelector('canvas');
+                if (!canvas) {
+                    return { ok: false, error: "Map canvas element not found in DOM" };
+                }
+                if (canvas.width === 0 || canvas.height === 0) {
+                    return { ok: false, error: "Map canvas dimensions are zero" };
+                }
+                return { ok: true, width: canvas.width, height: canvas.height };
+            }''')
+            self.last_health_status = status
+            return status
+        except Exception as e:
+            err_res = {"ok": False, "error": str(e)}
+            self.last_health_status = err_res
+            return err_res
 
     async def ensure_started(self):
-        """Ensures the headless Chromium instance and MSN page are initialized."""
+        """Ensures the headless Chromium instance and MSN page are initialized with SwiftShader."""
         if self.is_initialized and self.page and not self.page.is_closed():
             return
 
@@ -87,11 +110,13 @@ class MSNBrowserService:
                     launch_kwargs: Dict[str, Any] = {
                         "headless": True,
                         "args": [
+                            # Software WebGL via Google SwiftShader (ANGLE)
+                            "--use-gl=angle",
+                            "--use-angle=swiftshader",
+                            "--enable-webgl",
+                            "--enable-unsafe-swiftshader",
                             "--no-sandbox",
-                            "--disable-setuid-sandbox",
                             "--disable-dev-shm-usage",
-                            "--disable-gpu",
-                            "--disable-software-rasterizer",
                             "--mute-audio",
                             "--no-first-run",
                             "--disable-background-networking",
@@ -114,7 +139,7 @@ class MSNBrowserService:
 
                 self.page = await self.context.new_page()
 
-                # Block heavy ad domains and analytics to accelerate map rendering
+                # Block heavy ad domains and tracking analytics to accelerate map rendering
                 async def route_handler(route):
                     req_url = route.request.url.lower()
                     blocked = ["doubleclick.net", "adnxs.com", "google-analytics.com", "scorecardresearch.com", "taboola.com"]
@@ -132,10 +157,10 @@ class MSNBrowserService:
                 logger.info(f"Navigating headless Chromium to {url}")
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-                # Inject style overrides to hide banners
+                # Inject style overrides to hide cookie banner
                 await self.page.add_style_tag(content=CLEAN_MAP_CSS)
 
-                # Dismiss cookie dialog
+                # Dismiss cookie dialog if present
                 try:
                     await self.page.evaluate('''() => {
                         const btn = document.querySelector('#onetrust-accept-btn-handler');
@@ -146,15 +171,22 @@ class MSNBrowserService:
                 except Exception:
                     pass
 
-                # Wait for canvas to be present
+                # Wait for canvas to be attached and initialized
                 try:
                     await self.page.wait_for_selector('canvas', timeout=15000)
                 except Exception:
                     pass
-                await asyncio.sleep(2.5)
+
+                # Allow MapLibre GL to fetch and render initial vector tiles
+                await asyncio.sleep(3.0)
+
+                # Validate map rendering health
+                health = await self.check_map_health()
+                if not health["ok"]:
+                    raise RuntimeError(f"Map initialization failed: {health['error']}")
 
                 self.is_initialized = True
-                logger.info("MSN Chromium instance successfully initialized.")
+                logger.info("MSN Chromium instance successfully initialized with WebGL support.")
             except Exception as e:
                 logger.error(f"Failed to start MSN Chromium instance: {e}")
                 self.is_initialized = False
@@ -170,6 +202,12 @@ class MSNBrowserService:
             return self.last_frame_bytes
 
         async with self.lock:
+            # Check map health before capturing
+            health = await self.check_map_health()
+            if not health["ok"]:
+                logger.error(f"Map health check failed: {health['error']}")
+                raise RuntimeError(f"Map rendering failed: {health['error']}")
+
             try:
                 frame = await self.page.screenshot(type="jpeg", quality=80, clip=self.clip_area)
                 self.last_frame_bytes = frame
@@ -177,8 +215,6 @@ class MSNBrowserService:
                 return frame
             except Exception as e:
                 logger.error(f"Error capturing screenshot: {e}")
-                if self.last_frame_bytes:
-                    return self.last_frame_bytes
                 raise
 
     async def interact(self, action: str, data: Dict[str, Any]) -> bytes:
@@ -189,6 +225,10 @@ class MSNBrowserService:
         await self.ensure_started()
 
         async with self.lock:
+            health = await self.check_map_health()
+            if not health["ok"]:
+                raise RuntimeError(f"Map rendering failed: {health['error']}")
+
             x = float(data.get("x", self.viewport_width / 2))
             y = float(data.get("y", self.map_height / 2))
 
@@ -228,7 +268,7 @@ class MSNBrowserService:
                         await self.page.mouse.move(cx, cy)
                         await asyncio.sleep(0.015)
                     await self.page.mouse.up()
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.25)
 
                 elif action == "wheel":
                     dx = float(data.get("deltaX", 0))
@@ -270,8 +310,6 @@ class MSNBrowserService:
                 return frame
             except Exception as e:
                 logger.error(f"Error handling interaction {action}: {e}")
-                if self.last_frame_bytes:
-                    return self.last_frame_bytes
                 raise
 
     async def close(self):

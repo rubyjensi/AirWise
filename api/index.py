@@ -241,6 +241,14 @@ async def proxy_msn_resolver(request: Request, resolver_path: str):
     except Exception:
         raise HTTPException(status_code=404, detail="Resolver resource not found")
 
+@app.get("/api/msn/health")
+async def get_msn_health():
+    """
+    Returns the real-time health status of Chromium's WebGL map rendering.
+    """
+    health = await msn_browser.check_map_health()
+    return health
+
 @app.get("/api/msn/frame")
 async def get_msn_frame():
     """
@@ -257,7 +265,9 @@ async def get_msn_frame():
             }
         )
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Live Chromium stream starting: {e}")
+        logger.error(f"Failed to capture MSN frame: {e}")
+        raise HTTPException(status_code=503, detail=f"Map rendering failed: {e}")
+
 
 @app.post("/api/msn/interact")
 async def interact_msn_map(request: Request):
