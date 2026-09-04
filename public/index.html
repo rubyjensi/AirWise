@@ -220,12 +220,40 @@
                   </div>
                 </div>
 
-                <!-- MSN Weather Live Iframe Map (Secondary Tab) -->
+                <!-- Live Interactive MSN Stream View (Headless Chromium Stream) -->
                 <div id="msnMapWrapper" class="msn-map-wrapper" style="display: none;">
-                  <iframe id="msnMapFrame" src="/api/msn-map?zoom=10" class="msn-map-iframe" title="MSN Weather Air Quality Map" loading="lazy" allow="geolocation"></iframe>
-                  <div class="msn-frame-footer-overlay">
-                    <span>Direct MSN Stream</span>
-                    <a href="https://www.msn.com/en-in/weather/maps/airquality?zoom=10" target="_blank" rel="noopener noreferrer">Open Full Window ↗</a>
+                  <div class="msn-stream-viewport" id="msnStreamViewport">
+                    <img id="msnStreamImg" class="msn-stream-canvas" alt="Live MSN Weather Air Quality Map" draggable="false" />
+                    
+                    <!-- Live Loading Indicator -->
+                    <div id="msnStreamSpinner" class="msn-stream-spinner">
+                      <div class="stream-pulse-ring"></div>
+                      <span style="font-size: 13px; font-weight: 500; color: #fff;">Connecting to Live MSN Chromium Stream…</span>
+                    </div>
+
+                    <!-- Floating Zoom Controls -->
+                    <div class="msn-stream-controls">
+                      <button class="stream-btn" id="streamZoomInBtn" title="Zoom In">+</button>
+                      <div class="stream-btn-divider"></div>
+                      <button class="stream-btn" id="streamZoomOutBtn" title="Zoom Out">−</button>
+                    </div>
+                  </div>
+
+                  <!-- Live Stream HUD -->
+                  <div class="msn-stream-hud">
+                    <div class="hud-left">
+                      <span class="hud-live-dot"></span>
+                      <span class="hud-title">MSN LIVE RADAR</span>
+                      <span class="hud-timestamp" id="streamTimestamp">Connecting…</span>
+                    </div>
+                    <div class="hud-center">
+                      <span>Drag to pan • Scroll to zoom</span>
+                    </div>
+                    <div class="hud-right">
+                      <a href="https://www.msn.com/en-in/weather/maps/airquality?zoom=10" target="_blank" rel="noopener noreferrer" class="hud-ext-link">
+                        MSN ↗
+                      </a>
+                    </div>
                   </div>
                 </div>
 

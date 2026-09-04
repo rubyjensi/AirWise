@@ -3,13 +3,18 @@ VayuGuard Main FastAPI Application
 Serves the unified /api/home endpoint, city searches, and mounts public static assets.
 """
 
-from fastapi import FastAPI, Query, HTTPException, Request, Response
+from fastapi import FastAPI, Query, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
+import time
+import base64
 import httpx
+import logging
 from typing import Optional, List, Dict, Any
+
+from api.msn_browser_service import msn_browser
 
 from api.models import (
     HomeResponse, CurrentWeather, CurrentAirQuality,
@@ -235,6 +240,79 @@ async def proxy_msn_resolver(request: Request, resolver_path: str):
             )
     except Exception:
         raise HTTPException(status_code=404, detail="Resolver resource not found")
+
+@app.get("/api/msn/frame")
+async def get_msn_frame():
+    """
+    Returns a live JPEG screenshot from top-level headless Chromium running MSN Weather map.
+    """
+    try:
+        frame_bytes = await msn_browser.get_screenshot()
+        return Response(
+            content=frame_bytes,
+            media_type="image/jpeg",
+            headers={
+                "X-Capture-Timestamp": str(int(time.time())),
+                "Cache-Control": "no-cache, no-store, must-revalidate"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Live Chromium stream starting: {e}")
+
+@app.post("/api/msn/interact")
+async def interact_msn_map(request: Request):
+    """
+    Forwards user clicks, drags, wheel zoom events directly to Chromium running MSN.
+    """
+    try:
+        body = await request.json()
+        action = body.get("action", "click")
+        frame_bytes = await msn_browser.interact(action, body)
+        b64_img = base64.b64encode(frame_bytes).decode("utf-8")
+        return {
+            "success": True,
+            "image": f"data:image/jpeg;base64,{b64_img}",
+            "timestamp": int(time.time())
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.websocket("/api/msn/stream")
+async def msn_stream_ws(websocket: WebSocket):
+    """
+    Real-time interactive bidirectional stream for live map pan, drag, and zoom.
+    """
+    await websocket.accept()
+    try:
+        initial_frame = await msn_browser.get_screenshot()
+        b64 = base64.b64encode(initial_frame).decode("utf-8")
+        await websocket.send_json({
+            "type": "frame",
+            "image": f"data:image/jpeg;base64,{b64}",
+            "timestamp": int(time.time()),
+            "width": 800,
+            "height": 500
+        })
+
+        while True:
+            msg = await websocket.receive_json()
+            action = msg.get("action")
+            if action:
+                updated_frame = await msn_browser.interact(action, msg)
+                b64_up = base64.b64encode(updated_frame).decode("utf-8")
+                await websocket.send_json({
+                    "type": "frame",
+                    "image": f"data:image/jpeg;base64,{b64_up}",
+                    "timestamp": int(time.time())
+                })
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logging.getLogger("airwise").info(f"Stream WS disconnected: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_browser():
+    await msn_browser.close()
 
 @app.get("/api/home", response_model=HomeResponse)
 @app.get("/home", response_model=HomeResponse)

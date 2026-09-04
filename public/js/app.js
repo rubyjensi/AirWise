@@ -4,6 +4,7 @@ import { fetchHomeData } from './api.js';
 import { speakAdvisory, stopSpeech } from './speech.js';
 import { renderHourlyStrip } from './charts.js';
 import { setupPlaces } from './places-map.js';
+import { MSNInteractiveStream } from './msn-interactive.js';
 
 // DOM Elements
 const canvasEl = document.getElementById('atmosphericCanvas');
@@ -142,6 +143,8 @@ function getAqiHexColor(aqi) {
   return '#8b1e1e';
 }
 
+let msnStream = null;
+
 function initAirQualityMap() {
   const mapContainer = document.getElementById('airQualityLeafletMap');
   if (!mapContainer || typeof L === 'undefined') return;
@@ -159,6 +162,26 @@ function initAirQualityMap() {
       btnModeRadar.classList.remove('active');
       msnMapWrapper.style.display = 'block';
       radarMapWrapper.style.display = 'none';
+
+      // Connect to live interactive Playwright Chromium stream
+      if (!msnStream) {
+        msnStream = new MSNInteractiveStream({
+          container: document.getElementById('msnStreamViewport'),
+          imgEl: document.getElementById('msnStreamImg'),
+          statusEl: document.getElementById('streamTimestamp'),
+          spinnerEl: document.getElementById('msnStreamSpinner')
+        });
+        msnStream.init();
+
+        document.getElementById('streamZoomInBtn')?.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          msnStream.zoomIn();
+        });
+        document.getElementById('streamZoomOutBtn')?.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          msnStream.zoomOut();
+        });
+      }
     };
 
     btnModeRadar.onclick = (e) => {
@@ -218,17 +241,12 @@ function updateAirQualityMap(d) {
   const aqi = d.air_quality.aqi;
 
   // Update Live MSN Weather Map Iframe & Direct Link
-  const msnMapFrame = document.getElementById('msnMapFrame');
-  const msnExternalLink = document.getElementById('msnExternalLink');
-  const locKey = `${lat.toFixed(4)},${lon.toFixed(4)}`;
-
-  if (msnMapFrame && msnMapFrame.getAttribute('data-loc') !== locKey) {
-    msnMapFrame.setAttribute('data-loc', locKey);
-    msnMapFrame.src = `/api/msn-map?zoom=10&lat=${lat}&lon=${lon}`;
-  }
-
   if (msnExternalLink) {
     msnExternalLink.href = `https://www.msn.com/en-in/weather/maps/airquality?zoom=10&lat=${lat}&lon=${lon}`;
+  }
+
+  if (msnStream && d) {
+    msnStream.navigateTo(lat, lon, 10);
   }
 
   if (!leafletMap) {
