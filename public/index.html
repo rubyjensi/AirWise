@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0B1020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>AirWise — Atmospheric Weather & Health</title>
+  
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+  
+  <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/sf-pro-display">
+  <link rel="stylesheet" href="/styles/tokens.css">
+  <link rel="stylesheet" href="/styles/base.css">
+  <link rel="stylesheet" href="/styles/weather-scenes.css">
+  <link rel="stylesheet" href="/styles/components.css">
+  <link rel="stylesheet" href="/styles/motion.css">
+</head>
+<body>
+
+  <div class="app-wrapper">
+    
+    <!-- DESKTOP PRESENTER PANEL (Visible on screen width >= 768px) -->
+    <aside class="presenter-panel" id="presenterPanel">
+      <div class="presenter-header">
+        <div class="brand-tag">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          AirWise • Environmental Health
+        </div>
+        <h1>Atmosphere first.<br>Health guidance second.</h1>
+        <p>Translating atmospheric telemetry into personalized biological inhalation dosage and optimal activity windows.</p>
+      </div>
+
+      <div class="proof-points">
+        <div class="proof-card">
+          <div class="icon-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#28D777" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <div>
+            <h3>Personal Inhaled Dose</h3>
+            <p>Calculates microgram particulate mass deposited in lung airways based on exertion and respiratory sensitivity.</p>
+          </div>
+        </div>
+
+        <div class="proof-card">
+          <div class="icon-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#72A7FF" stroke-width="2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <div>
+            <h3>Lower-Exposure Windows</h3>
+            <p>Analyzes 24-hour Open-Meteo wind and ozone dispersion to find the safest 90-minute activity window.</p>
+          </div>
+        </div>
+
+        <div class="proof-card">
+          <div class="icon-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF9F2F" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <div>
+            <h3>Bilingual Native Voice</h3>
+            <p>Grounded plain-language speech briefings in Hindi and Indian English via browser Web Speech API.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="qr-box">
+        <img class="qr-code-img" id="desktopQrImage" alt="Scan QR Code to open on Mobile" src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=https%3A%2F%2Frobbie-explicit-obtained-insert.trycloudflare.com" />
+        <div class="qr-info">
+          <h4>Test Live on Your Phone</h4>
+          <p>Point your camera at this QR code to launch VayuGuard with native mobile GPS location.</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MOBILE STAGE -->
+    <main class="device-stage">
+      <div class="mobile-shell" id="mobileShell">
+        
+        <!-- Condition-Aware Atmospheric Canvas -->
+        <div class="atmospheric-canvas scene-clear" id="atmosphericCanvas"></div>
+        <div class="aqi-tint-layer tint-unhealthy" id="tintLayer"></div>
+
+        <!-- App Views Viewport -->
+        <div class="views-viewport">
+          
+          <!-- VIEW 1: NOW (Atmospheric Hero & Personal Guidance) -->
+          <section class="view-page active" id="view-now">
+            <!-- Top App Bar -->
+            <header class="top-nav">
+              <button class="location-chip" id="gpsBtn" title="Use Live GPS Location">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"/><circle cx="12" cy="10" r="3"/></svg>
+                <span id="locationLabel">New Delhi, Delhi</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+
+              <div class="header-actions">
+                <button class="icon-btn" id="langToggleBtn" title="Switch Language">HI</button>
+                <button class="icon-btn" id="moreBtn" title="Settings & Profile">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                </button>
+              </div>
+            </header>
+
+            <!-- Hero Section -->
+            <div class="hero-atmosphere">
+              <h1 class="contextual-sentence" id="contextSentence">A hazy atmosphere—lighter activity and shorter outdoor time are the better call.</h1>
+              
+              <div class="metric-row">
+                <div class="hero-aqi tabular-nums" id="heroAqi">184</div>
+                <span class="category-pill cat-unhealthy" id="categoryPill">Unhealthy</span>
+              </div>
+
+              <div class="weather-sub-row">
+                <span class="tabular-nums" id="weatherTemp">29°C</span>
+                <span id="weatherCondition">Hazy sunshine • Feels 32°C</span>
+              </div>
+
+              <div class="station-pill" id="stationInfo">
+                <span class="station-dot"></span>
+                <span>Mandir Marg DPCC • 1.4 km away • updated 12m ago</span>
+              </div>
+            </div>
+
+            <!-- Personal Guidance Card -->
+            <div class="guidance-card">
+              <div class="guidance-header">
+                <h2>Personal Exposure Estimate</h2>
+                <button class="audio-btn" id="listenBtn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                  <span id="listenBtnText">Listen</span>
+                </button>
+              </div>
+
+              <!-- Quick Activity Selector Chips -->
+              <div class="quick-selector-row">
+                <button class="selector-chip activity-chip active" data-act="walk">30m Walk</button>
+                <button class="selector-chip activity-chip" data-act="run_cycle">Run / Cycle</button>
+                <button class="selector-chip activity-chip" data-act="outdoor_labor">Work Shift</button>
+                <button class="selector-chip activity-chip" data-act="rest">Rest</button>
+              </div>
+
+              <!-- Inhaled Dose Display -->
+              <div class="dose-hero-box">
+                <div class="dose-label">Estimated inhaled PM2.5 deposition:</div>
+                <div class="dose-range-val tabular-nums" id="doseVal">14–20 µg</div>
+              </div>
+
+              <p class="guidance-action-text" id="guidanceAction">Pace yourself during your walk. Limit total outdoor time under 30 minutes.</p>
+              <p class="guidance-why-text" id="guidanceWhy">Fine particulate matter is elevated; higher breathing rates significantly increase alveolar deposition.</p>
+
+              <!-- Duration Selector -->
+              <div class="quick-selector-row">
+                <button class="selector-chip duration-chip" data-dur="15">15 mins</button>
+                <button class="selector-chip duration-chip active" data-dur="30">30 mins</button>
+                <button class="selector-chip duration-chip" data-dur="45">45 mins</button>
+                <button class="selector-chip duration-chip" data-dur="60">60 mins</button>
+              </div>
+
+              <button class="how-it-works-toggle" id="howItWorksBtn">How this estimate works (WHO Models & Assumptions)</button>
+            </div>
+          </section>
+
+          <!-- VIEW 2: PLAN (Lower-Exposure Window & 24h Hourly Strip) -->
+          <section class="view-page" id="view-plan">
+            <header class="top-nav">
+              <h2 style="font-size: 20px; font-weight: 700;">Lower-Exposure Plan</h2>
+            </header>
+
+            <div class="plan-hero-banner">
+              <span class="plan-tag">Recommended Window</span>
+              <div class="plan-window-time" id="planWindowTime">6:30 PM – 8:00 PM</div>
+              <p class="plan-reason" id="planReason">PM2.5 is forecast to disperse as surface ventilation picks up and solar photochemical ozone subsides.</p>
+            </div>
+
+            <div class="hourly-strip-container">
+              <div class="strip-title">24-Hour Atmospheric Outlook</div>
+              <div class="hourly-scroll" id="hourlyContainer">
+                <!-- Dynamically populated hourly cards -->
+              </div>
+            </div>
+
+            <div class="proof-card" style="margin-top: 10px;">
+              <div class="icon-box">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#28D777" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              </div>
+              <div>
+                <h3>42% Inhalation Dose Reduction</h3>
+                <p>Postponing your workout to the recommended 6:30 PM window reduces particulate intake by nearly half.</p>
+              </div>
+            </div>
+          </section>
+
+          <!-- VIEW 3: PLACES (City Search & Stations) -->
+          <section class="view-page" id="view-places">
+            <header class="top-nav">
+              <h2 style="font-size: 20px; font-weight: 700;">Places & Monitors</h2>
+            </header>
+
+            <div class="search-input-box">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="placesSearchInput" placeholder="Search Indian or global city…" />
+            </div>
+
+            <div class="city-tile-list" id="placesListContainer">
+              <!-- Dynamically populated city tiles -->
+            </div>
+          </section>
+
+        </div>
+
+        <!-- Bottom Navigation Bar -->
+        <nav class="bottom-nav">
+          <button class="nav-tab-btn active" data-view="now">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            <span>Now</span>
+          </button>
+          
+          <button class="nav-tab-btn" data-view="plan">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span>Plan</span>
+          </button>
+          
+          <button class="nav-tab-btn" data-view="places">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            <span>Places</span>
+          </button>
+        </nav>
+
+        <!-- "How It Works" Clinical Modal Sheet -->
+        <div class="modal-backdrop" id="infoModal">
+          <div class="modal-sheet">
+            <div class="modal-handle"></div>
+            <h3 class="modal-title">Clinical Dosage Model</h3>
+            <p style="font-size: 14px; color: var(--text-muted); line-height: 1.5; margin-bottom: 16px;">
+              VayuGuard translates ambient micrograms of PM2.5 per cubic meter into biological particulate mass deposited in your pulmonary alveoli:
+            </p>
+            <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 12px; font-family: monospace; font-size: 13px; margin-bottom: 16px;">
+              Inhaled Dose = Concentration × Ventilation Rate × Duration × Deposition Fraction
+            </div>
+            <h4 style="font-size: 14px; font-weight: 600; margin-bottom: 8px;">Key Assumptions:</h4>
+            <ul id="assumptionsList" style="font-size: 13px; color: var(--text-muted); line-height: 1.5; padding-left: 18px; margin-bottom: 20px;">
+              <!-- Populated via JS -->
+            </ul>
+            <div class="disclaimer-banner">
+              VayuGuard provides environmental estimates for planning; it is not a medical device or a substitute for professional medical advice.
+            </div>
+            <button class="selector-chip active" id="closeInfoModalBtn" style="width: 100%; margin-top: 16px; padding: 12px;">Close</button>
+          </div>
+        </div>
+
+        <!-- "More / Settings" Sheet -->
+        <div class="modal-backdrop" id="moreModal">
+          <div class="modal-sheet">
+            <div class="modal-handle"></div>
+            <h3 class="modal-title">Sensitivity Profile</h3>
+            <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 16px;">Choose your sensitivity profile to calibrate deposition fractions:</p>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
+              <label style="display: flex; align-items: center; gap: 10px; font-size: 14px;">
+                <input type="radio" name="profileOption" value="standard" checked> Standard Healthy Adult (DF ~40%)
+              </label>
+              <label style="display: flex; align-items: center; gap: 10px; font-size: 14px;">
+                <input type="radio" name="profileOption" value="sensitive_respiratory"> Respiratory Sensitivity / Asthma (DF ~62%)
+              </label>
+              <label style="display: flex; align-items: center; gap: 10px; font-size: 14px;">
+                <input type="radio" name="profileOption" value="sensitive_cardiac"> Cardiovascular Sensitivity (DF ~45%)
+              </label>
+              <label style="display: flex; align-items: center; gap: 10px; font-size: 14px;">
+                <input type="radio" name="profileOption" value="child_elderly"> Child or Senior Citizen (DF ~52%)
+              </label>
+              <label style="display: flex; align-items: center; gap: 10px; font-size: 14px;">
+                <input type="radio" name="profileOption" value="outdoor_worker"> Prolonged Outdoor Worker
+              </label>
+            </div>
+
+            <div class="disclaimer-banner">
+              <strong>Medical Disclaimer:</strong> VayuGuard estimates are based on public atmospheric models and pulmonary ventilation references. Consult your physician for medical management.
+            </div>
+            <button class="selector-chip active" id="closeMoreModalBtn" style="width: 100%; margin-top: 16px; padding: 12px;">Done</button>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+  </div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
