@@ -3,7 +3,7 @@ VayuGuard Main FastAPI Application
 Serves the unified /api/home endpoint, city searches, and mounts public static assets.
 """
 
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
@@ -23,7 +23,7 @@ from api.clinical_engine import (
 from api.advisory_service import generate_deterministic_guidance
 
 app = FastAPI(
-    title="VayuGuard API",
+    title="AirWise API",
     description="Atmospheric Weather & Personalized Environmental Health Guidance",
     version="1.0.0"
 )
@@ -35,6 +35,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def vercel_rewrite_middleware(request: Request, call_next):
+    path_param = request.query_params.get("__path")
+    matched_header = request.headers.get("x-matched-path")
+    
+    target_path = None
+    if path_param:
+        target_path = "/" + path_param.lstrip("/")
+        if not target_path.startswith("/api"):
+            target_path = "/api" + target_path
+    elif matched_header and not matched_header.startswith("/api/index.py"):
+        target_path = matched_header.split("?")[0]
+        
+    if target_path:
+        request.scope["path"] = target_path
+
+    response = await call_next(request)
+    return response
 
 # Curated search database for quick latency-free city lookup
 POPULAR_CITIES = [
@@ -56,10 +75,12 @@ POPULAR_CITIES = [
 ]
 
 @app.get("/api/health")
+@app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "VayuGuard API", "version": "1.0.0"}
+    return {"status": "ok", "service": "AirWise API", "version": "1.0.0"}
 
 @app.get("/api/places/search")
+@app.get("/places/search")
 def search_places(q: str = Query(..., min_length=1)):
     query = q.lower().strip()
     results = []
@@ -69,6 +90,7 @@ def search_places(q: str = Query(..., min_length=1)):
     return {"query": q, "results": results[:6]}
 
 @app.get("/api/home", response_model=HomeResponse)
+@app.get("/home", response_model=HomeResponse)
 async def get_home(
     lat: float = Query(default=28.6139, ge=-90, le=90),
     lon: float = Query(default=77.2090, ge=-180, le=180),
@@ -251,6 +273,10 @@ async def get_home(
         disclaimer="VayuGuard provides environmental estimates for personal planning; it is not a medical device or a substitute for medical advice."
     )
 
-# Static file serving for local development
-if os.path.exists("public"):
+# Mount public static assets
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+public_dir = os.path.join(BASE_DIR, "public")
+if os.path.exists(public_dir):
+    app.mount("/", StaticFiles(directory=public_dir, html=True), name="public")
+elif os.path.exists("public"):
     app.mount("/", StaticFiles(directory="public", html=True), name="public")
