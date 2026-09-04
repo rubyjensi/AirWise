@@ -78,5 +78,6 @@ class HomeResponse(BaseModel):
     personal_guidance: Dict[str, Any]
     lower_exposure_window: LowerExposureWindow
     hourly: List[HourlyItem]
+    nearby_stations: List[Dict[str, Any]] = []
     data_quality: Dict[str, Any]
     disclaimer: str

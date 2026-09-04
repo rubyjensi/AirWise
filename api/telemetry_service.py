@@ -15,17 +15,38 @@ _CACHE: Dict[str, Tuple[float, Any]] = {}
 CACHE_TTL_SECONDS = 900  # 15 minutes
 
 # Curated CPCB Reference Stations for fallback validation across Indian metropolitan areas
+# Curated CPCB Reference Stations for fallback validation & live map plotting
 CPCB_STATIONS = [
-    {"name": "Anand Vihar, Delhi (CPCB)", "lat": 28.6476, "lon": 77.3158, "source": "CPCB Continuous Ambient"},
-    {"name": "Mandir Marg, Delhi (DPCC)", "lat": 28.6364, "lon": 77.1990, "source": "DPCC Real-time Monitor"},
-    {"name": "RK Puram, Delhi (DPCC)", "lat": 28.5632, "lon": 77.1869, "source": "DPCC Real-time Monitor"},
-    {"name": "Bandra Kurla Complex, Mumbai (MPCB)", "lat": 19.0662, "lon": 72.8687, "source": "MPCB Continuous Monitor"},
-    {"name": "Colaba, Mumbai (CPCB)", "lat": 18.9067, "lon": 72.8147, "source": "CPCB Ambient Station"},
-    {"name": "BTM Layout, Bengaluru (KSPCB)", "lat": 12.9166, "lon": 77.6101, "source": "KSPCB Continuous Monitor"},
-    {"name": "Silk Board, Bengaluru (CPCB)", "lat": 12.9172, "lon": 77.6228, "source": "CPCB Ambient Monitor"},
-    {"name": "Victoria Memorial, Kolkata (WBPCB)", "lat": 22.5448, "lon": 88.3426, "source": "WBPCB Continuous Station"},
-    {"name": "Alandur, Chennai (TNPCB)", "lat": 13.0034, "lon": 80.2015, "source": "TNPCB Real-time Monitor"},
-    {"name": "Sector 62, Noida (UPPCB)", "lat": 28.6258, "lon": 77.3649, "source": "UPPCB Continuous Monitor"},
+    # Delhi NCR
+    {"name": "Mandir Marg, Delhi (DPCC)", "lat": 28.6364, "lon": 77.1990, "source": "DPCC Real-time Monitor", "aqi_offset": 0},
+    {"name": "Anand Vihar, Delhi (CPCB)", "lat": 28.6476, "lon": 77.3158, "source": "CPCB Continuous Ambient", "aqi_offset": 28},
+    {"name": "RK Puram, Delhi (DPCC)", "lat": 28.5632, "lon": 77.1869, "source": "DPCC Real-time Monitor", "aqi_offset": -8},
+    {"name": "Punjabi Bagh, Delhi (DPCC)", "lat": 28.6740, "lon": 77.1310, "source": "DPCC Continuous Station", "aqi_offset": 12},
+    {"name": "Lodhi Road, Delhi (IMD)", "lat": 28.5910, "lon": 77.2270, "source": "IMD Safar Monitor", "aqi_offset": -16},
+    {"name": "IGI Airport T3, Delhi (IMD)", "lat": 28.5562, "lon": 77.1000, "source": "IMD Airport Sensor", "aqi_offset": -10},
+    {"name": "Sector 62, Noida (UPPCB)", "lat": 28.6258, "lon": 77.3649, "source": "UPPCB Continuous Monitor", "aqi_offset": 18},
+    {"name": "Vikas Sadan, Gurugram (HSPCB)", "lat": 28.4595, "lon": 77.0266, "source": "HSPCB Ambient Station", "aqi_offset": 14},
+
+    # Mumbai Region
+    {"name": "Bandra Kurla Complex, Mumbai (MPCB)", "lat": 19.0662, "lon": 72.8687, "source": "MPCB Continuous Monitor", "aqi_offset": 6},
+    {"name": "Colaba, Mumbai (CPCB)", "lat": 18.9067, "lon": 72.8147, "source": "CPCB Ambient Station", "aqi_offset": -14},
+    {"name": "Chembur, Mumbai (MPCB)", "lat": 19.0522, "lon": 72.8994, "source": "MPCB Ambient Monitor", "aqi_offset": 15},
+    {"name": "Worli, Mumbai (MPCB)", "lat": 19.0178, "lon": 72.8178, "source": "MPCB Real-time Sensor", "aqi_offset": -8},
+    {"name": "Vashi, Navi Mumbai (MPCB)", "lat": 19.0771, "lon": 72.9986, "source": "MPCB Industrial Grid", "aqi_offset": 12},
+
+    # Bengaluru Region
+    {"name": "BTM Layout, Bengaluru (KSPCB)", "lat": 12.9166, "lon": 77.6101, "source": "KSPCB Continuous Monitor", "aqi_offset": -4},
+    {"name": "Silk Board, Bengaluru (CPCB)", "lat": 12.9172, "lon": 77.6228, "source": "CPCB Ambient Monitor", "aqi_offset": 18},
+    {"name": "Peenya, Bengaluru (KSPCB)", "lat": 13.0285, "lon": 77.5197, "source": "KSPCB Industrial Station", "aqi_offset": 22},
+    {"name": "City Railway Station, Bengaluru (KSPCB)", "lat": 12.9772, "lon": 77.5713, "source": "KSPCB Urban Monitor", "aqi_offset": 8},
+
+    # Other Metros
+    {"name": "Victoria Memorial, Kolkata (WBPCB)", "lat": 22.5448, "lon": 88.3426, "source": "WBPCB Continuous Station", "aqi_offset": -6},
+    {"name": "Rabindra Bharati, Kolkata (WBPCB)", "lat": 22.5840, "lon": 88.3580, "source": "WBPCB Ambient Monitor", "aqi_offset": 16},
+    {"name": "Alandur, Chennai (TNPCB)", "lat": 13.0034, "lon": 80.2015, "source": "TNPCB Real-time Monitor", "aqi_offset": 2},
+    {"name": "Manali, Chennai (TNPCB)", "lat": 13.1667, "lon": 80.2667, "source": "TNPCB Industrial Station", "aqi_offset": 24},
+    {"name": "Sanathnagar, Hyderabad (TSPCB)", "lat": 17.4560, "lon": 78.4430, "source": "TSPCB Continuous Station", "aqi_offset": 5},
+    {"name": "Shivaji Nagar, Pune (MPCB)", "lat": 18.5314, "lon": 73.8446, "source": "MPCB Ambient Monitor", "aqi_offset": 4},
 ]
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

@@ -122,6 +122,173 @@ function renderApp() {
     const currentUrl = window.location.href;
     qrImageEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(currentUrl)}`;
   }
+
+  // Update Regional Air Quality Map
+  updateAirQualityMap(d);
+}
+
+// Leaflet Air Quality Radar Map (MSN Weather Style)
+let leafletMap = null;
+let stationMarkersGroup = null;
+let userMarker = null;
+let atmosphericHeatCircle = null;
+
+function getAqiHexColor(aqi) {
+  if (aqi <= 50) return '#2ea043';
+  if (aqi <= 100) return '#d29922';
+  if (aqi <= 150) return '#db6d28';
+  if (aqi <= 200) return '#f85149';
+  if (aqi <= 300) return '#bc8cff';
+  return '#8b1e1e';
+}
+
+function initAirQualityMap() {
+  const mapContainer = document.getElementById('airQualityLeafletMap');
+  if (!mapContainer || typeof L === 'undefined') return;
+  if (leafletMap) return;
+
+  const lat = state.location?.lat || 28.6139;
+  const lon = state.location?.lon || 77.2090;
+
+  leafletMap = L.map('airQualityLeafletMap', {
+    zoomControl: false,
+    attributionControl: true,
+    scrollWheelZoom: false,
+    tap: true
+  }).setView([lat, lon], 10);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd',
+    maxZoom: 18,
+    attribution: '&copy; CARTO &copy; OpenStreetMap'
+  }).addTo(leafletMap);
+
+  stationMarkersGroup = L.layerGroup().addTo(leafletMap);
+
+  document.getElementById('mapRecenterBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (leafletMap && state.homeData) {
+      leafletMap.flyTo([state.homeData.latitude, state.homeData.longitude], 10, { duration: 0.8 });
+    }
+  });
+
+  document.getElementById('mapZoomInBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (leafletMap) leafletMap.zoomIn();
+  });
+
+  document.getElementById('mapZoomOutBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (leafletMap) leafletMap.zoomOut();
+  });
+
+  leafletMap.on('zoomend', () => {
+    const zoomLevelEl = document.getElementById('mapZoomLevel');
+    if (zoomLevelEl && leafletMap) {
+      zoomLevelEl.textContent = `Zoom ${leafletMap.getZoom()}`;
+    }
+  });
+}
+
+function updateAirQualityMap(d) {
+  if (!d) return;
+  const lat = d.latitude;
+  const lon = d.longitude;
+  const aqi = d.air_quality.aqi;
+
+  if (!leafletMap) {
+    initAirQualityMap();
+  }
+  if (!leafletMap) return;
+
+  leafletMap.setView([lat, lon], 10);
+
+  // Update user live location marker
+  if (userMarker) {
+    userMarker.setLatLng([lat, lon]);
+  } else {
+    const userIcon = L.divIcon({
+      className: 'user-marker-container',
+      html: '<div class="user-location-marker"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8]
+    });
+    userMarker = L.marker([lat, lon], { icon: userIcon, zIndexOffset: 1000 }).addTo(leafletMap);
+    userMarker.bindTooltip("You are here", { direction: 'top', offset: [0, -8] });
+  }
+
+  // Atmospheric Dispersion Plume Overlay (MSN Weather Style)
+  if (atmosphericHeatCircle) {
+    leafletMap.removeLayer(atmosphericHeatCircle);
+  }
+
+  const plumeColor = getAqiHexColor(aqi);
+  atmosphericHeatCircle = L.circle([lat, lon], {
+    radius: 14000,
+    color: plumeColor,
+    fillColor: plumeColor,
+    fillOpacity: 0.16,
+    weight: 1.5,
+    dashArray: '4, 6'
+  }).addTo(leafletMap);
+
+  // Nearby monitoring stations
+  if (stationMarkersGroup) {
+    stationMarkersGroup.clearLayers();
+  }
+
+  const stations = d.nearby_stations || [];
+  const banner = document.getElementById('mapStationBanner');
+  const bannerName = document.getElementById('bannerStationName');
+  const bannerMeta = document.getElementById('bannerStationMeta');
+  const bannerVal = document.getElementById('bannerAqiVal');
+  const bannerCat = document.getElementById('bannerAqiCat');
+  const bannerPill = document.getElementById('bannerAqiPill');
+
+  stations.forEach((st) => {
+    const catClass = st.category.toLowerCase().replace(/\s+/g, '-');
+    const markerIcon = L.divIcon({
+      className: 'aqi-pin-wrap',
+      html: `<div class="aqi-map-pin pin-${catClass}">${st.aqi}</div>`,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16]
+    });
+
+    const marker = L.marker([st.lat, st.lon], { icon: markerIcon });
+    marker.on('click', () => {
+      if (banner) {
+        banner.style.display = 'flex';
+        bannerName.textContent = st.name;
+        bannerMeta.textContent = `${st.distance_km.toFixed(1)} km away • ${st.source}`;
+        bannerVal.textContent = st.aqi;
+        bannerCat.textContent = st.category;
+        if (bannerPill) bannerPill.style.background = getAqiHexColor(st.aqi);
+      }
+      leafletMap.panTo([st.lat, st.lon]);
+    });
+
+    stationMarkersGroup.addLayer(marker);
+  });
+
+  // Default selection to nearest station
+  if (stations.length > 0 && banner) {
+    const nearest = stations[0];
+    banner.style.display = 'flex';
+    bannerName.textContent = nearest.name;
+    bannerMeta.textContent = `${nearest.distance_km.toFixed(1)} km away • ${nearest.source}`;
+    bannerVal.textContent = nearest.aqi;
+    bannerCat.textContent = nearest.category;
+    if (bannerPill) bannerPill.style.background = getAqiHexColor(nearest.aqi);
+  }
+
+  const subEl = document.getElementById('mapLocationSubtitle');
+  if (subEl) {
+    subEl.textContent = `${d.location_name} regional monitoring grid`;
+  }
+
+  setTimeout(() => {
+    if (leafletMap) leafletMap.invalidateSize();
+  }, 250);
 }
 
 // 3. Setup Navigation & Event Listeners
@@ -141,6 +308,10 @@ function setupEvents() {
       btn.classList.add('active');
       document.getElementById(`view-${targetView}`).classList.add('active');
       state.set({ currentView: targetView });
+
+      if (targetView === 'now' && leafletMap) {
+        setTimeout(() => leafletMap.invalidateSize(), 150);
+      }
     });
   });
 

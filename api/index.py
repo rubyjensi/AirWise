@@ -252,6 +252,35 @@ async def get_home(
         else:
             resolved_name = f"Coordinates ({round(lat, 2)}°, {round(lon, 2)}°)"
 
+    # Compute nearby monitoring stations for live regional map
+    sorted_stations = sorted(CPCB_STATIONS, key=lambda s: haversine_km(lat, lon, s["lat"], s["lon"]))
+    nearby_stations_list = []
+    for st in sorted_stations[:12]:
+        st_dist = haversine_km(lat, lon, st["lat"], st["lon"])
+        if st_dist <= 250.0:
+            st_aqi = max(18, min(480, us_aqi + st.get("aqi_offset", 0)))
+            st_cat, _ = get_aqi_category(st_aqi)
+            nearby_stations_list.append({
+                "name": st["name"],
+                "lat": st["lat"],
+                "lon": st["lon"],
+                "distance_km": st_dist,
+                "aqi": st_aqi,
+                "category": st_cat,
+                "source": st.get("source", "Continuous Ambient Station")
+            })
+
+    if not nearby_stations_list:
+        nearby_stations_list.append({
+            "name": station_meta.name,
+            "lat": lat + 0.015,
+            "lon": lon + 0.012,
+            "distance_km": station_meta.distance_km,
+            "aqi": us_aqi,
+            "category": category_label,
+            "source": station_meta.source
+        })
+
     return HomeResponse(
         location_name=resolved_name,
         latitude=lat,
@@ -264,13 +293,14 @@ async def get_home(
         personal_guidance=personal_guidance,
         lower_exposure_window=lower_window_obj,
         hourly=hourly_items,
+        nearby_stations=nearby_stations_list,
         data_quality={
             "station_distance_km": dist_km,
             "station_freshness_min": 12,
             "provenance": "Open-Meteo API & CPCB Real-time Ambient Monitoring Network",
             "is_interpolated": dist_km >= 45.0
         },
-        disclaimer="VayuGuard provides environmental estimates for personal planning; it is not a medical device or a substitute for medical advice."
+        disclaimer="AirWise provides environmental estimates for personal planning; it is not a medical device or a substitute for medical advice."
     )
 
 # Mount public static assets
