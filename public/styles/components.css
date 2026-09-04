@@ -828,6 +828,30 @@
   background: #0d1117;
 }
 
+.msn-frame-footer-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(15, 20, 28, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted, #8b949e);
+  z-index: 10;
+}
+
+.msn-frame-footer-overlay a {
+  color: #2997ff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
 .radar-map-wrapper {
   position: absolute;
   top: 0;

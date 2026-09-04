@@ -208,6 +208,34 @@ async def proxy_msn_bundle(bundle_path: str):
     except Exception:
         raise HTTPException(status_code=404, detail="Bundle not found")
 
+@app.get("/api/resolver/{resolver_path:path}")
+@app.get("/resolver/{resolver_path:path}")
+async def proxy_msn_resolver(request: Request, resolver_path: str):
+    """
+    Proxies MSN configuration and experiment resolver endpoints.
+    """
+    query_str = str(request.query_params)
+    target_url = f"https://assets.msn.com/resolver/{resolver_path}"
+    if query_str:
+        target_url += f"?{query_str}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                target_url,
+                headers={
+                    "User-Agent": request.headers.get("user-agent", "Mozilla/5.0"),
+                    "Accept": request.headers.get("accept", "*/*"),
+                }
+            )
+            return Response(
+                content=r.content,
+                status_code=r.status_code,
+                media_type=r.headers.get("content-type", "application/json"),
+                headers={"Cache-Control": "public, max-age=3600"}
+            )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Resolver resource not found")
+
 @app.get("/api/home", response_model=HomeResponse)
 @app.get("/home", response_model=HomeResponse)
 async def get_home(
