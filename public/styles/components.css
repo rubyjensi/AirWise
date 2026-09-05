@@ -1458,17 +1458,7 @@
 }
 
 .leaflet-control-attribution {
-  background: rgba(11, 15, 23, 0.7) !important;
-  color: rgba(255, 255, 255, 0.4) !important;
-  font-size: 9px !important;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border-radius: 4px;
-  margin: 0 4px 28px 0 !important;
-}
-
-.leaflet-control-attribution a {
-  color: rgba(255, 255, 255, 0.6) !important;
+  display: none !important;
 }
 
 .leaflet-control-zoom {

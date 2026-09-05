@@ -237,15 +237,14 @@ function initAirQualityMap() {
 
   leafletMap = L.map('airQualityLeafletMap', {
     zoomControl: false,
-    attributionControl: true,
+    attributionControl: false,
     scrollWheelZoom: false,
     tap: true
   }).setView([lat, lon], 10);
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=cb1_2xmm_1_5759ab2125a92bccacbc7848', {
     subdomains: 'abcd',
-    maxZoom: 18,
-    attribution: '&copy; CARTO &copy; OpenStreetMap'
+    maxZoom: 19
   }).addTo(leafletMap);
 
   stationMarkersGroup = L.layerGroup().addTo(leafletMap);
