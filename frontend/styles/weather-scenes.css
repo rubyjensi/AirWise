@@ -1,0 +1,101 @@
+/* Atmospheric Canvas System */
+.atmospheric-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  transition: background 1.2s var(--ease-emphasized), opacity 0.8s ease;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Scene 1: Clear Day */
+.scene-clear {
+  background: linear-gradient(180deg, #1e3a8a 0%, #2563eb 40%, #38bdf8 80%, #60a5fa 100%);
+}
+.scene-clear::before {
+  content: '';
+  position: absolute;
+  top: -80px;
+  right: -60px;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle, rgba(254, 240, 138, 0.45) 0%, rgba(253, 224, 71, 0.15) 50%, transparent 75%);
+  border-radius: 50%;
+  filter: blur(25px);
+}
+
+/* Scene 2: Cloudy */
+.scene-cloudy {
+  background: linear-gradient(180deg, #1e293b 0%, #334155 45%, #475569 85%, #64748b 100%);
+}
+.scene-cloudy::before {
+  content: '';
+  position: absolute;
+  top: 10%;
+  left: -20%;
+  width: 140%;
+  height: 180px;
+  background: radial-gradient(ellipse, rgba(203, 213, 225, 0.18) 0%, transparent 70%);
+  filter: blur(35px);
+}
+
+/* Scene 3: Rain */
+.scene-rain {
+  background: linear-gradient(180deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+}
+.scene-rain::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(105deg, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 1px, transparent 1px, transparent 24px);
+  opacity: 0.6;
+}
+
+/* Scene 4: Haze / High Pollution */
+.scene-haze {
+  background: linear-gradient(180deg, #1c1917 0%, #292524 35%, #44403c 70%, #57534e 100%);
+}
+.scene-haze::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60%;
+  background: linear-gradient(0deg, rgba(217, 119, 6, 0.18) 0%, rgba(180, 83, 9, 0.08) 50%, transparent 100%);
+  filter: blur(20px);
+}
+
+/* Scene 5: Night */
+.scene-night {
+  background: linear-gradient(180deg, #030712 0%, #090e1a 45%, #0f172a 85%, #172033 100%);
+}
+.scene-night::before {
+  content: '';
+  position: absolute;
+  top: 40px;
+  right: 50px;
+  width: 60px;
+  height: 60px;
+  background: radial-gradient(circle, rgba(248, 250, 252, 0.2) 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(12px);
+}
+
+/* Subtle Lower-Third AQI Status Vignette */
+.aqi-tint-layer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 38%;
+  pointer-events: none;
+  transition: opacity 0.8s ease;
+  opacity: 0.35;
+}
+.tint-good { background: linear-gradient(0deg, var(--good) 0%, transparent 100%); }
+.tint-moderate { background: linear-gradient(0deg, var(--moderate) 0%, transparent 100%); }
+.tint-sensitive { background: linear-gradient(0deg, var(--sensitive) 0%, transparent 100%); }
+.tint-unhealthy { background: linear-gradient(0deg, var(--unhealthy) 0%, transparent 100%); }
+.tint-very-unhealthy { background: linear-gradient(0deg, var(--very-unhealthy) 0%, transparent 100%); }
+.tint-hazardous { background: linear-gradient(0deg, var(--hazardous) 0%, transparent 100%); }

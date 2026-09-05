@@ -5,7 +5,9 @@ Primary mode is fast, deterministic clinical translation with optional LLM parap
 """
 
 import os
+import json
 from typing import Dict, Any, Optional
+import httpx
 
 def generate_deterministic_guidance(
     activity: str,
@@ -105,23 +107,56 @@ async def generate_llm_enhanced_advisory(
     provider: str = "auto"
 ) -> Optional[Dict[str, str]]:
     """
-    Optional enhancement via Groq or Gemini.
-    Strictly preserves calculated numbers and provides an empathetic voice script.
+    Optional doctor enhancement via Groq or Gemini.
+    Strictly preserves calculated numbers and provides an empathetic personal physician consultation script.
     """
     groq_key = os.getenv("GROQ_API_KEY")
     gemini_key = os.getenv("GEMINI_API_KEY")
-    
-    # If no keys, return None to keep deterministic guidance
+
     if not groq_key and not gemini_key:
         return None
-        
+
     prompt = (
-        f"You are the voice of VayuGuard, an atmospheric health companion. "
-        f"Rephrase this deterministic clinical advice into one calm, friendly sentence for English and Hindi.\n"
-        f"Data: Activity: {structured_data['activity']}, Dose: {structured_data['dose_range_str']}, "
-        f"Action: {structured_data['guidance_text']['en']}\n"
-        f"Constraint: NEVER alter the numbers or change the medical advice. Return JSON with 'en' and 'hi' keys."
+        f"You are the user's dedicated personal physician and pulmonologist speaking directly to your patient.\n"
+        f"Rephrase this deterministic clinical guidance into a deeply caring, warm, medically precise consultation sentence in English and Hindi.\n"
+        f"Tone: Conversational, caring family doctor speaking directly to 'you' ('As your doctor...', 'I want you to...').\n"
+        f"Hindi MUST start with: 'आपके डॉक्टर के रूप में मेरी सलाह है कि...'\n"
+        f"Clinical Telemetry: Activity: {structured_data.get('activity')}, Sensitivity: {structured_data.get('sensitivity')}, "
+        f"Inhaled Dose: {structured_data.get('dose_range_str')}, Action: {structured_data.get('guidance_text', {}).get('en')}\n"
+        f"Constraint: Return JSON only with 'en' and 'hi' keys. Never alter numbers."
     )
-    
-    # Optional LLM call can be added here if keys exist
+
+    candidate_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"]
+    try:
+        if groq_key:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                for model in candidate_models:
+                    res = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {groq_key}"},
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": "You are a personal caring physician and pulmonary specialist. Always return valid JSON only."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            "response_format": {"type": "json_object"},
+                            "temperature": 0.25,
+                        }
+                    )
+                    if res.status_code == 200:
+                        raw = res.json()["choices"][0]["message"]["content"].strip()
+                        if raw.startswith("```"):
+                            lines = raw.splitlines()
+                            if lines[0].startswith("```"):
+                                lines = lines[1:]
+                            if lines and lines[-1].startswith("```"):
+                                lines = lines[:-1]
+                            raw = "\n".join(lines).strip()
+                        return json.loads(raw)
+                    elif res.status_code == 404:
+                        continue
+    except Exception as e:
+        print(f"[AdvisoryService] LLM enhanced advisory error: {e}")
+
     return None

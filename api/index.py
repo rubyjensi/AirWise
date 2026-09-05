@@ -14,18 +14,18 @@ import httpx
 import logging
 from typing import Optional, List, Dict, Any
 
-from api.msn_browser_service import msn_browser
-
 from api.models import (
     HomeResponse, CurrentWeather, CurrentAirQuality,
-    StationMetadata, LowerExposureWindow, HourlyItem
+    StationMetadata, LowerExposureWindow, HourlyItem,
+    CigaretteEquivalents
 )
 from api.telemetry_service import (
     fetch_open_meteo_telemetry, haversine_km, get_aqi_category,
     determine_scene, get_contextual_sentence, CPCB_STATIONS
 )
 from api.clinical_engine import (
-    calculate_inhalation_dose, evaluate_multi_stressor, find_lower_exposure_window
+    calculate_inhalation_dose, evaluate_multi_stressor, find_lower_exposure_window,
+    calculate_cigarette_equivalents
 )
 from api.advisory_service import generate_deterministic_guidance
 
@@ -95,6 +95,121 @@ def search_places(q: str = Query(..., min_length=1)):
         if query in city["name"].lower() or query in city["state"].lower() or query in city["country"].lower():
             results.append(city)
     return {"query": q, "results": results[:6]}
+
+_GEOCODE_CACHE: Dict[str, str] = {}
+
+async def reverse_geocode_coords(lat: float, lon: float) -> str:
+    """
+    Reverse-geocodes GPS coordinates to a human-readable, specific locality name.
+    Uses OpenStreetMap Nominatim with a fast 3.5s timeout, caching results in-memory.
+    Falls back to POPULAR_CITIES closest match within 30km or rounded coordinates.
+    """
+    cache_key = f"{round(lat, 3)},{round(lon, 3)}"
+    if cache_key in _GEOCODE_CACHE:
+        return _GEOCODE_CACHE[cache_key]
+
+    def _fallback() -> str:
+        if POPULAR_CITIES:
+            closest_city = min(POPULAR_CITIES, key=lambda c: haversine_km(lat, lon, c["lat"], c["lon"]))
+            if haversine_km(lat, lon, closest_city["lat"], closest_city["lon"]) <= 30.0:
+                return f"{closest_city['name']}, {closest_city['state']}"
+        return f"Location ({round(lat, 2)}, {round(lon, 2)})"
+
+    url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
+    headers = {
+        "User-Agent": "AirWiseApp/1.0 (airwise-support@airwise.internal)",
+        "Accept": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=3.5) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, dict):
+                    address = data.get("address", {})
+                    # Specific locality candidate: suburb, neighbourhood, residential, subdistrict, road, town, village
+                    local_candidate_keys = [
+                        "suburb", "neighbourhood", "residential", "subdistrict",
+                        "road", "town", "village"
+                    ]
+                    specific = None
+                    for k in local_candidate_keys:
+                        v = address.get(k)
+                        if v and isinstance(v, str) and v.strip():
+                            specific = v.strip()
+                            break
+
+                    broad_keys = ["city", "town", "village", "county", "state"]
+                    broad = None
+
+                    if specific:
+                        for k in broad_keys:
+                            v = address.get(k)
+                            if v and isinstance(v, str) and v.strip():
+                                v_clean = v.strip()
+                                if (
+                                    v_clean.lower() != specific.lower()
+                                    and v_clean.lower() not in specific.lower()
+                                    and specific.lower() not in v_clean.lower()
+                                ):
+                                    broad = v_clean
+                                    break
+                        if not broad:
+                            st = address.get("state")
+                            if st and isinstance(st, str) and st.strip():
+                                st_clean = st.strip()
+                                if (
+                                    st_clean.lower() != specific.lower()
+                                    and st_clean.lower() not in specific.lower()
+                                    and specific.lower() not in st_clean.lower()
+                                ):
+                                    broad = st_clean
+                        resolved = f"{specific}, {broad}" if broad else specific
+                    else:
+                        for k in ["city", "town", "village"]:
+                            v = address.get(k)
+                            if v and isinstance(v, str) and v.strip():
+                                specific = v.strip()
+                                break
+                        if specific:
+                            st = address.get("state")
+                            if st and isinstance(st, str) and st.strip():
+                                st_clean = st.strip()
+                                if (
+                                    st_clean.lower() != specific.lower()
+                                    and st_clean.lower() not in specific.lower()
+                                    and specific.lower() not in st_clean.lower()
+                                ):
+                                    broad = st_clean
+                            resolved = f"{specific}, {broad}" if broad else specific
+                        elif address.get("state"):
+                            resolved = address["state"].strip()
+                        else:
+                            resolved = _fallback()
+
+                    if resolved:
+                        _GEOCODE_CACHE[cache_key] = resolved
+                        return resolved
+    except Exception as e:
+        logging.warning(f"Nominatim reverse geocode lookup failed for ({lat}, {lon}): {e}")
+
+    fallback_val = _fallback()
+    _GEOCODE_CACHE[cache_key] = fallback_val
+    return fallback_val
+
+@app.get("/api/reverse-geocode")
+@app.get("/reverse-geocode")
+async def reverse_geocode_endpoint(
+    lat: float = Query(..., ge=-90, le=90, description="Latitude"),
+    lon: float = Query(..., ge=-180, le=180, description="Longitude")
+):
+    exact_name = await reverse_geocode_coords(lat, lon)
+    return {
+        "name": exact_name,
+        "latitude": lat,
+        "longitude": lon
+    }
 
 @app.get("/api/msn-map", response_class=HTMLResponse)
 @app.get("/msn-map", response_class=HTMLResponse)
@@ -241,88 +356,130 @@ async def proxy_msn_resolver(request: Request, resolver_path: str):
     except Exception:
         raise HTTPException(status_code=404, detail="Resolver resource not found")
 
-@app.get("/api/msn/health")
-async def get_msn_health():
+@app.get("/api/aqi-map", response_class=HTMLResponse)
+@app.get("/aqi-map", response_class=HTMLResponse)
+async def get_aqi_map():
     """
-    Returns the real-time health status of Chromium's WebGL map rendering.
+    Reverse-proxies https://www.aqi.in/in/air-quality-map with injected base URL
+    and clean CSS rules to display seamlessly in AirWise.
     """
-    health = await msn_browser.check_map_health()
-    return health
+    url = "https://www.aqi.in/in/air-quality-map"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-IN,en;q=0.9",
+        "Referer": "https://www.aqi.in/",
+    }
 
-@app.get("/api/msn/frame")
-async def get_msn_frame():
-    """
-    Returns a live JPEG screenshot from top-level headless Chromium running MSN Weather map.
-    """
+    fallback_html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Air Quality Map</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #0f141c;
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      box-sizing: border-box;
+      text-align: center;
+    }
+    .map-container {
+      width: 100%;
+      max-width: 480px;
+      padding: 32px 24px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 20px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(16px);
+    }
+    h2 {
+      margin: 0 0 10px 0;
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    p {
+      color: rgba(255, 255, 255, 0.65);
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0 0 24px 0;
+    }
+    a.map-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #ffffff;
+      background: #0071e3;
+      padding: 12px 22px;
+      border-radius: 980px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.2s, transform 0.15s;
+    }
+    a.map-link:hover {
+      background: #0077ed;
+      transform: scale(1.02);
+    }
+  </style>
+</head>
+<body>
+  <div class="map-container">
+    <h2>Air Quality Map</h2>
+    <p>Live environmental telemetry map preview is initializing or temporarily unavailable inside this iframe container.</p>
+    <a class="map-link" href="https://www.aqi.in/in/air-quality-map" target="_blank" rel="noopener noreferrer">
+      Open Live Map on AQI.in &rarr;
+    </a>
+  </div>
+</body>
+</html>"""
+
+    response_headers = {
+        "X-Frame-Options": "ALLOWALL",
+        "Content-Security-Policy": "frame-ancestors *",
+    }
+
     try:
-        frame_bytes = await msn_browser.get_screenshot()
-        return Response(
-            content=frame_bytes,
-            media_type="image/jpeg",
-            headers={
-                "X-Capture-Timestamp": str(int(time.time())),
-                "Cache-Control": "no-cache, no-store, must-revalidate"
-            }
-        )
-    except Exception as e:
-        logger.error(f"Failed to capture MSN frame: {e}")
-        raise HTTPException(status_code=503, detail=f"Map rendering failed: {e}")
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            html = resp.text
+            if resp.status_code != 200 or "challenge-platform" in html or "__CF$cv$params" in html or "cf_chl_" in html or "Just a moment..." in html:
+                return HTMLResponse(content=fallback_html, status_code=200, headers=response_headers)
+    except Exception:
+        return HTMLResponse(content=fallback_html, status_code=200, headers=response_headers)
 
+    # Inject <base href="https://www.aqi.in/"> into <head>
+    if "<head>" in html:
+        html = html.replace("<head>", '<head>\n<base href="https://www.aqi.in/">\n', 1)
 
-@app.post("/api/msn/interact")
-async def interact_msn_map(request: Request):
-    """
-    Forwards user clicks, drags, wheel zoom events directly to Chromium running MSN.
-    """
-    try:
-        body = await request.json()
-        action = body.get("action", "click")
-        frame_bytes = await msn_browser.interact(action, body)
-        b64_img = base64.b64encode(frame_bytes).decode("utf-8")
-        return {
-            "success": True,
-            "image": f"data:image/jpeg;base64,{b64_img}",
-            "timestamp": int(time.time())
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Inject CSS to hide AQI.in top headers, banners, navbar, and footers
+    clean_css = """
+<style id="airwise-aqi-cleaner">
+header, nav, footer, .header-container, .app-download, .banner-ad, [class*="navbar"], [class*="Header"] { display: none !important; } html, body, #root, #__next { margin: 0 !important; padding: 0 !important; width: 100vw !important; height: 100vh !important; overflow: hidden !important; }
+</style>
+"""
+    if "</head>" in html:
+        html = html.replace("</head>", f"{clean_css}\n</head>", 1)
+    else:
+        html += clean_css
 
-@app.websocket("/api/msn/stream")
-async def msn_stream_ws(websocket: WebSocket):
-    """
-    Real-time interactive bidirectional stream for live map pan, drag, and zoom.
-    """
-    await websocket.accept()
-    try:
-        initial_frame = await msn_browser.get_screenshot()
-        b64 = base64.b64encode(initial_frame).decode("utf-8")
-        await websocket.send_json({
-            "type": "frame",
-            "image": f"data:image/jpeg;base64,{b64}",
-            "timestamp": int(time.time()),
-            "width": 800,
-            "height": 500
-        })
+    response_headers["Cache-Control"] = "public, max-age=300"
+    return HTMLResponse(
+        content=html,
+        status_code=200,
+        headers=response_headers
+    )
 
-        while True:
-            msg = await websocket.receive_json()
-            action = msg.get("action")
-            if action:
-                updated_frame = await msn_browser.interact(action, msg)
-                b64_up = base64.b64encode(updated_frame).decode("utf-8")
-                await websocket.send_json({
-                    "type": "frame",
-                    "image": f"data:image/jpeg;base64,{b64_up}",
-                    "timestamp": int(time.time())
-                })
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        logging.getLogger("airwise").info(f"Stream WS disconnected: {e}")
-
-@app.on_event("shutdown")
-async def shutdown_browser():
-    await msn_browser.close()
 
 @app.get("/api/home", response_model=HomeResponse)
 @app.get("/home", response_model=HomeResponse)
@@ -366,13 +523,22 @@ async def get_home(
     nearest_station = min(CPCB_STATIONS, key=lambda s: haversine_km(lat, lon, s["lat"], s["lon"]))
     dist_km = haversine_km(lat, lon, nearest_station["lat"], nearest_station["lon"])
     
+    is_far = dist_km > 15.0
+    station_warning = (
+        f"Nearest monitoring station is {round(dist_km, 1)} km away. Local air quality may be inconsistent due to micro-climates."
+        if is_far
+        else None
+    )
+
     station_meta = StationMetadata(
         name=nearest_station["name"] if dist_km < 45.0 else f"Regional Ambient Grid ({round(lat, 2)}, {round(lon, 2)})",
         distance_km=dist_km,
         updated_minutes_ago=12,
         source=nearest_station["source"] if dist_km < 45.0 else "Copernicus Atmospheric Monitoring / Open-Meteo",
         is_modeled=(dist_km >= 45.0),
-        confidence_level="High" if dist_km < 15.0 else "Medium" if dist_km < 50.0 else "Limited"
+        confidence_level="High" if dist_km < 15.0 else "Medium" if dist_km < 50.0 else "Limited",
+        is_far=is_far,
+        warning=station_warning
     )
 
     # Weather condition mapping
@@ -453,6 +619,8 @@ async def get_home(
 
     # Clinical Inhalation Dose Calculation
     dose_range = calculate_inhalation_dose(pm25, activity, profile, duration)
+    cigarette_data = calculate_cigarette_equivalents(pm25, activity, duration)
+    cigarette_obj = CigaretteEquivalents(**cigarette_data)
     better_window_dict = find_lower_exposure_window(hourly_dicts_for_planner, us_aqi, activity, profile)
 
     lower_window_obj = LowerExposureWindow(
@@ -480,12 +648,13 @@ async def get_home(
 
     # Resolved location name
     resolved_name = location_name
-    if not resolved_name:
-        closest_city = min(POPULAR_CITIES, key=lambda c: haversine_km(lat, lon, c["lat"], c["lon"]))
-        if haversine_km(lat, lon, closest_city["lat"], closest_city["lon"]) < 30.0:
-            resolved_name = f"{closest_city['name']}, {closest_city['state']}"
-        else:
-            resolved_name = f"Coordinates ({round(lat, 2)}°, {round(lon, 2)}°)"
+    loc_clean = (location_name or "").strip()
+    if (
+        not loc_clean
+        or loc_clean in ("My Current Location", "Live Location", "Locating…", "Locating...")
+        or loc_clean.lower() in ("my current location", "live location", "locating…", "locating...", "locating", "current location")
+    ):
+        resolved_name = await reverse_geocode_coords(lat, lon)
 
     # Compute nearby monitoring stations for live regional map
     sorted_stations = sorted(CPCB_STATIONS, key=lambda s: haversine_km(lat, lon, s["lat"], s["lon"]))
@@ -526,6 +695,7 @@ async def get_home(
         station=station_meta,
         contextual_sentence=context_sentence,
         personal_guidance=personal_guidance,
+        cigarette_equivalents=cigarette_obj,
         lower_exposure_window=lower_window_obj,
         hourly=hourly_items,
         nearby_stations=nearby_stations_list,
@@ -538,10 +708,22 @@ async def get_home(
         disclaimer="AirWise provides environmental estimates for personal planning; it is not a medical device or a substitute for medical advice."
     )
 
-# Mount public static assets
+from backend.models import PersonalizationRequest, ProfileEvaluationResponse
+from backend.advisory_agent import AdvisoryAgent
+
+@app.post("/api/v1/evaluate-profile", response_model=ProfileEvaluationResponse)
+async def evaluate_profile_endpoint(req: PersonalizationRequest):
+    return await AdvisoryAgent.evaluate_personalization_profile(req)
+
+# Mount frontend/public static assets
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+frontend_dir = os.path.join(BASE_DIR, "frontend")
 public_dir = os.path.join(BASE_DIR, "public")
-if os.path.exists(public_dir):
+if os.path.exists(frontend_dir):
+    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+elif os.path.exists(public_dir):
     app.mount("/", StaticFiles(directory=public_dir, html=True), name="public")
+elif os.path.exists("frontend"):
+    app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 elif os.path.exists("public"):
     app.mount("/", StaticFiles(directory="public", html=True), name="public")

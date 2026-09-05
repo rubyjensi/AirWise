@@ -40,13 +40,21 @@ CPCB_STATIONS = [
     {"name": "Peenya, Bengaluru (KSPCB)", "lat": 13.0285, "lon": 77.5197, "source": "KSPCB Industrial Station", "aqi_offset": 22},
     {"name": "City Railway Station, Bengaluru (KSPCB)", "lat": 12.9772, "lon": 77.5713, "source": "KSPCB Urban Monitor", "aqi_offset": 8},
 
-    # Other Metros
-    {"name": "Victoria Memorial, Kolkata (WBPCB)", "lat": 22.5448, "lon": 88.3426, "source": "WBPCB Continuous Station", "aqi_offset": -6},
-    {"name": "Rabindra Bharati, Kolkata (WBPCB)", "lat": 22.5840, "lon": 88.3580, "source": "WBPCB Ambient Monitor", "aqi_offset": 16},
-    {"name": "Alandur, Chennai (TNPCB)", "lat": 13.0034, "lon": 80.2015, "source": "TNPCB Real-time Monitor", "aqi_offset": 2},
-    {"name": "Manali, Chennai (TNPCB)", "lat": 13.1667, "lon": 80.2667, "source": "TNPCB Industrial Station", "aqi_offset": 24},
-    {"name": "Sanathnagar, Hyderabad (TSPCB)", "lat": 17.4560, "lon": 78.4430, "source": "TSPCB Continuous Station", "aqi_offset": 5},
-    {"name": "Shivaji Nagar, Pune (MPCB)", "lat": 18.5314, "lon": 73.8446, "source": "MPCB Ambient Monitor", "aqi_offset": 4},
+    # Central India - Indore & Bhopal (MPPCB)
+    {"name": "Chhoti Gwaltoli, Indore (MPPCB)", "lat": 22.7196, "lon": 75.8677, "source": "MPPCB Continuous Station", "aqi_offset": 5},
+    {"name": "Sanwer Road Industrial Area, Indore (MPPCB)", "lat": 22.7667, "lon": 75.8611, "source": "MPPCB Industrial Station", "aqi_offset": 14},
+    {"name": "Vijay Nagar, Indore (MPPCB)", "lat": 22.7533, "lon": 75.8937, "source": "MPPCB Ambient Sensor", "aqi_offset": -2},
+    {"name": "T.T. Nagar, Bhopal (MPPCB)", "lat": 23.2332, "lon": 77.3995, "source": "MPPCB Real-time Monitor", "aqi_offset": 0},
+    {"name": "Paryavaran Parisar, Bhopal (MPPCB)", "lat": 23.2156, "lon": 77.4350, "source": "MPPCB Continuous Station", "aqi_offset": -4},
+
+    # Western India - Gujarat & Rajasthan
+    {"name": "Maninagar, Ahmedabad (GPCB)", "lat": 22.9966, "lon": 72.6030, "source": "GPCB Continuous Monitor", "aqi_offset": 8},
+    {"name": "Mansarovar, Jaipur (RSPCB)", "lat": 26.8529, "lon": 75.7684, "source": "RSPCB Ambient Station", "aqi_offset": 6},
+
+    # Northern & Eastern India - Lucknow, Chandigarh, Patna
+    {"name": "Lalbagh, Lucknow (UPPCB)", "lat": 26.8467, "lon": 80.9462, "source": "UPPCB Continuous Station", "aqi_offset": 12},
+    {"name": "Sector 22, Chandigarh (CPCC)", "lat": 30.7333, "lon": 76.7794, "source": "CPCC Real-time Monitor", "aqi_offset": -5},
+    {"name": "Muradpur, Patna (BSPCB)", "lat": 25.6207, "lon": 85.1666, "source": "BSPCB Continuous Station", "aqi_offset": 15},
 ]
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

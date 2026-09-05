@@ -214,3 +214,87 @@ def find_lower_exposure_window(
             "reason_en": "Conditions are relatively consistent. If stepping outside, keep duration moderate.",
             "reason_hi": "वायु गुणवत्ता लगभग एक समान रहेगी। बाहर निकलते समय समय-सीमा सीमित रखें।"
         }
+
+
+def calculate_cigarette_equivalents(
+    pm25: float,
+    activity: str,
+    duration_minutes: int
+) -> Dict[str, Any]:
+    """
+    Calculates cigarette equivalence using the Berkeley Earth / Muller formulation:
+    - 22 µg/m³ PM2.5 over 24h = 1 cigarette = 352 µg inhaled mass benchmark.
+    - Minute ventilation rates (VE in m³/min):
+        rest: 0.007 m³/min (7 L/min)
+        walk: 0.016 m³/min (16 L/min)
+        run_cycle: 0.038 m³/min (38 L/min)
+        outdoor_labor / work shift: 0.030 m³/min (30 L/min)
+    - Inhaled mass (µg) = pm25 * VE * duration_minutes.
+    - Cigarette count = round(inhaled_mass / 352.0, 2), min 0.05.
+    - With N95 mask (90% filtration) = round(cigarette_count * 0.10, 2).
+    - Full day 24h outdoor cigarette equivalent = round(pm25 / 22.0, 1).
+    """
+    pm25_val = max(0.0, float(pm25))
+    dur = max(1, int(duration_minutes))
+
+    # Minute ventilation rates (m3/min)
+    ve_map = {
+        "rest": 0.007,
+        "walk": 0.016,
+        "run_cycle": 0.038,
+        "run": 0.038,
+        "cycle": 0.038,
+        "outdoor_labor": 0.030,
+        "work_shift": 0.030,
+        "labor": 0.030,
+    }
+    act_clean = (activity or "walk").lower().strip()
+    ve = ve_map.get(act_clean, 0.016)
+
+    inhaled_mass = pm25_val * ve * dur
+    raw_cigarettes = inhaled_mass / 352.0
+    cigarette_count = round(raw_cigarettes, 2)
+    if cigarette_count < 0.05:
+        cigarette_count = 0.05
+
+    with_n95 = round(cigarette_count * 0.10, 2)
+    full_day_cigarettes = round(pm25_val / 22.0, 1)
+
+    # Activity labels for readable subtext
+    act_labels = {
+        "rest": ("resting outdoors", "बाहर विश्राम"),
+        "walk": ("walking", "पैदल चलने"),
+        "run_cycle": ("running/cycling", "दौड़ने/साइकिल चलाने"),
+        "run": ("running", "दौड़ने"),
+        "cycle": ("cycling", "साइकिल चलाने"),
+        "outdoor_labor": ("outdoor labor", "शारीरिक श्रम"),
+        "work_shift": ("work shift", "काम की शिफ्ट"),
+    }
+    act_label_en, act_label_hi = act_labels.get(act_clean, (act_clean.replace("_", " "), act_clean))
+
+    if cigarette_count >= 1.0:
+        headline_en = f"Equivalent to smoking {cigarette_count:.2f} cigarettes"
+        headline_hi = f"{cigarette_count:.2f} सिगरेट पीने के बराबर धुआं"
+    else:
+        headline_en = f"Equivalent to smoking ~{cigarette_count:.2f} cigarettes"
+        headline_hi = f"लगभग {cigarette_count:.2f} सिगरेट के धुएं के बराबर असर"
+
+    subtext_en = (
+        f"{dur} min of {act_label_en} deposits ~{round(inhaled_mass, 1)} µg PM2.5. "
+        f"An N95 respirator reduces intake to ~{with_n95:.2f} cigs (full 24h outdoors = {full_day_cigarettes} cigs)."
+    )
+    subtext_hi = (
+        f"{dur} मिनट {act_label_hi} से फेफड़ों में ~{round(inhaled_mass, 1)} µg PM2.5 जमा होता है। "
+        f"N95 मास्क से यह घटकर ~{with_n95:.2f} सिगरेट रह जाता है (24 घंटे में ~{full_day_cigarettes} सिगरेट)।"
+    )
+
+    return {
+        "cigarette_count": cigarette_count,
+        "with_n95": with_n95,
+        "full_day_cigarettes": full_day_cigarettes,
+        "headline_en": headline_en,
+        "headline_hi": headline_hi,
+        "subtext_en": subtext_en,
+        "subtext_hi": subtext_hi,
+    }
+

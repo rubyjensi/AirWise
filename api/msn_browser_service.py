@@ -11,7 +11,12 @@ import time
 import logging
 from typing import Optional, Dict, Any
 
-from playwright.async_api import async_playwright, Playwright, Browser, BrowserContext, Page
+try:
+    from playwright.async_api import async_playwright, Playwright, Browser, BrowserContext, Page
+    HAS_PLAYWRIGHT = True
+except ImportError:
+    HAS_PLAYWRIGHT = False
+    Playwright = Browser = BrowserContext = Page = Any  # type: ignore
 
 logger = logging.getLogger("airwise.msn_browser")
 
@@ -62,9 +67,10 @@ class MSNBrowserService:
         self.viewport_height = self.header_offset_y + self.map_height
         self.clip_area = {"x": 0, "y": self.header_offset_y, "width": self.viewport_width, "height": self.map_height}
         self.current_zoom = 10
-        self.current_lat: Optional[float] = None
-        self.current_lon: Optional[float] = None
+        self.current_lat: float = 28.6139
+        self.current_lon: float = 77.2090
         self.last_health_status: Dict[str, Any] = {"ok": False, "status": "uninitialized"}
+
 
     async def check_map_health(self) -> Dict[str, Any]:
         """Validates that WebGL initialized and map canvas is actively rendering."""
@@ -94,6 +100,10 @@ class MSNBrowserService:
 
     async def ensure_started(self):
         """Ensures the headless Chromium instance and MSN page are initialized with SwiftShader."""
+        if not HAS_PLAYWRIGHT:
+            logger.info("Playwright not installed, skipping MSN browser headless stream.")
+            return
+
         if self.is_initialized and self.page and not self.page.is_closed():
             return
 

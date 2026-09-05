@@ -29,6 +29,7 @@
   --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro", "Helvetica Neue", sans-serif;
   --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "Helvetica Neue", sans-serif;
   --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  --font-editorial-serif: "Copernicus", "Tiempos Headline", "Ivar Headline", "Georgia", "Times New Roman", serif;
 
   /* Optical Tracking Rules from Apple HIG */
   --tracking-hero: -0.035em;
@@ -60,4 +61,11 @@
   --ease-standard: cubic-bezier(.2, .8, .2, 1);
   --ease-emphasized: cubic-bezier(.16, 1, .3, 1);
   --ease-exit: cubic-bezier(.4, 0, 1, 1);
+}
+ 
+.anthropic-serif-italic {
+  font-family: var(--font-editorial-serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--focus, #72A7FF);
 }

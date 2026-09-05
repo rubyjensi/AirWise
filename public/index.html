@@ -19,6 +19,13 @@
   <link rel="stylesheet" href="/styles/weather-scenes.css">
   <link rel="stylesheet" href="/styles/components.css">
   <link rel="stylesheet" href="/styles/motion.css">
+  <script>
+    if ('caches' in window) {
+      caches.keys().then(names => {
+        for (let name of names) caches.delete(name);
+      });
+    }
+  </script>
 </head>
 <body>
 
@@ -98,6 +105,7 @@
               </button>
 
               <div class="header-actions">
+                <button class="icon-btn" id="profilesBtn" title="Personalization Profiles" style="font-size: 14px; padding: 4px 6px;">👤</button>
                 <button class="icon-btn" id="langToggleBtn" title="Switch Language">HI</button>
                 <button class="icon-btn" id="moreBtn" title="Settings & Profile">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -125,10 +133,79 @@
               </div>
             </div>
 
-            <!-- Personal Guidance Card -->
+            <!-- Standalone Tips for You Section -->
+            <section class="tips-for-you-section" id="tipsForYouSection">
+              <div class="tips-section-header">
+                <h2 class="tips-headline">Tips for <span class="anthropic-serif-italic">you</span></h2>
+                <div class="tips-header-actions">
+                  <div class="doctor-badge-pill" id="doctorBadgePill">🩺 Personal Doctor's Advice</div>
+                  <div class="profile-badge-pill" id="profileBadgePill" style="display: none;">✨ Personalized Profile</div>
+                </div>
+              </div>
+
+              <!-- Surface Card with Doctor's Note, Prescriptions List, and Footer Strip -->
+              <div class="tips-card-surface" id="personalizedTipsBox">
+                <!-- Doctor's Opening Clinical Letter / Note -->
+                <div class="doctor-note-card" id="doctorNoteBox">
+                  <div class="doctor-note-header">
+                    <div class="doctor-profile-lead">
+                      <span class="doctor-avatar-emoji">🩺</span>
+                      <div class="doctor-titles">
+                        <span class="doctor-name">Dr. AirWise</span>
+                        <span class="doctor-designation">Attending Pulmonologist &amp; Health Advisor</span>
+                      </div>
+                    </div>
+                    <span class="doctor-rx-tag">Rx Briefing</span>
+                  </div>
+                  <p class="doctor-note-text" id="doctorNoteText">
+                    Today's atmospheric particulate concentration requires conscious respiratory pacing. Review your clinical prescription below before going outdoors.
+                  </p>
+                </div>
+
+                <!-- Doctor's Concise Steps List -->
+                <ul class="tips-bullet-list" id="tipsBulletList">
+                  <li class="doctor-step-item">
+                    <div class="doctor-step-badge">Step 1</div>
+                    <div class="doctor-step-content">
+                      <div class="doctor-step-title">Pace Transit</div>
+                      <div class="doctor-step-desc">Minimize outdoor exposure during high particulate peaks.</div>
+                    </div>
+                  </li>
+                  <li class="doctor-step-item">
+                    <div class="doctor-step-badge">Step 2</div>
+                    <div class="doctor-step-content">
+                      <div class="doctor-step-title">Seal Indoors</div>
+                      <div class="doctor-step-desc">Keep indoor spaces sealed and run HEPA air purification if available.</div>
+                    </div>
+                  </li>
+                </ul>
+
+                <!-- Footer Strip: Gear & Commute Recommendations -->
+                <div class="tips-footer-strip" id="tipsFooterStrip">
+                  <div class="tip-footer-item" id="tipGearItem" style="display: none;">
+                    <span class="tip-footer-badge">Prescribed Gear</span>
+                    <span class="tip-footer-val" id="tipGearVal"></span>
+                  </div>
+                  <div class="tip-footer-item" id="tipCommuteItem" style="display: none;">
+                    <span class="tip-footer-badge badge-commute">Commute Advisory</span>
+                    <span class="tip-footer-val" id="tipCommuteVal"></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Empty State Personalization Card -->
+              <div class="tips-empty-card" id="tipsEmptyState">
+                <p style="margin: 0; font-size: 13px; color: var(--text-muted);">Wanna tailor these tips to your commute &amp; health?</p>
+                <button class="selector-chip active" id="openProfilePromptBtn" onclick="openProfileModal()">Personalize for you</button>
+              </div>
+            </section>
+
+            <!-- Personal Guidance Card (Cigarette Equivalents Consumed) -->
             <div class="guidance-card">
               <div class="guidance-header">
-                <h2>Personal Exposure Estimate</h2>
+                <div>
+                  <h2>Cigarette Equivalents Consumed</h2>
+                </div>
                 <button class="audio-btn" id="listenBtn">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
                   <span id="listenBtnText">Listen</span>
@@ -143,10 +220,16 @@
                 <button class="selector-chip activity-chip" data-act="rest">Rest</button>
               </div>
 
-              <!-- Inhaled Dose Display -->
-              <div class="dose-hero-box">
-                <div class="dose-label">Estimated inhaled PM2.5 deposition:</div>
-                <div class="dose-range-val tabular-nums" id="doseVal">14–20 µg</div>
+              <!-- Inhaled Dose Display (Cigarette Equivalents) -->
+              <div class="dose-hero-box cig-hero-box">
+                <div style="display: flex; align-items: baseline; gap: 8px;">
+                  <span style="font-size: 26px; line-height: 1;">🚬</span>
+                  <span class="dose-range-val cig-hero-num tabular-nums" id="cigVal">0.4</span>
+                  <span class="cig-unit">cigarettes</span>
+                  <span id="doseVal" style="display: none;"></span>
+                </div>
+                <div class="cig-n95-pill" id="cigN95Pill">With N95 Mask: ~0.04 cigs (-90%)</div>
+                <div class="dose-label" id="doseLabel" style="font-size: 11px; margin-top: 6px;">PM2.5 equivalent mortality risk (Berkeley Earth Model)</div>
               </div>
 
               <p class="guidance-action-text" id="guidanceAction">Pace yourself during your walk. Limit total outdoor time under 30 minutes.</p>
@@ -160,10 +243,10 @@
                 <button class="selector-chip duration-chip" data-dur="60">60 mins</button>
               </div>
 
-              <button class="how-it-works-toggle" id="howItWorksBtn">How this estimate works (WHO Models & Assumptions)</button>
+              <button class="how-it-works-toggle" id="howItWorksBtn">How this estimate works (WHO Models &amp; Assumptions)</button>
             </div>
 
-            <!-- Regional Air Quality Map (MSN Weather Style) -->
+            <!-- Regional Air Quality Map (Open-Meteo) -->
             <div class="air-quality-map-section" id="airQualityMapSection">
               <div class="map-section-header">
                 <div class="map-title-row">
@@ -173,23 +256,17 @@
                     <line x1="16" y1="6" x2="16" y2="22"/>
                   </svg>
                   <div class="map-titles">
-                    <h2 class="map-main-title">Air Quality Radar</h2>
-                    <span class="map-subtitle" id="mapLocationSubtitle">Live MSN Weather Map & CPCB Grid</span>
+                    <h2 class="map-main-title">Air Quality Radar Map</h2>
+                    <span class="map-subtitle" id="mapLocationSubtitle">Live Open-Meteo Atmospheric Telemetry &amp; CPCB Grid</span>
                   </div>
                 </div>
-                <div class="map-header-actions">
-                  <div class="map-toggle-pill">
-                    <button class="map-mode-btn active" id="btnModeRadar" data-mode="radar">Live Radar</button>
-                    <button class="map-mode-btn" id="btnModeMsn" data-mode="msn">MSN Map</button>
-                  </div>
-                  <a href="https://www.msn.com/en-in/weather/maps/airquality?zoom=10" target="_blank" rel="noopener noreferrer" class="msn-link-btn" id="msnExternalLink" title="Open full interactive map on MSN Weather in new tab">
-                    <span>MSN Weather ↗</span>
-                  </a>
+                <div class="map-header-actions" id="mapHeaderActions">
+                  <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer" class="map-external-link" id="openMeteoExternalLink">Open-Meteo Data ↗</a>
                 </div>
               </div>
 
               <div class="aqi-map-card">
-                <!-- CPCB Leaflet Stations Radar Map (Primary Interactive View) -->
+                <!-- Single Live Interactive Leaflet Radar Map with Open-Meteo Telemetry -->
                 <div id="radarMapWrapper" class="radar-map-wrapper">
                   <div id="airQualityLeafletMap" class="aqi-leaflet-container"></div>
                   
@@ -208,51 +285,14 @@
                   <!-- Selected Station Interactive Banner Callout -->
                   <div class="map-station-banner" id="mapStationBanner" style="display: none;">
                     <div class="banner-left">
-                      <span class="station-tag" id="bannerStationName">Mandir Marg, Delhi</span>
-                      <span class="station-meta" id="bannerStationMeta">2.7 km away • DPCC Continuous</span>
+                      <span class="station-tag" id="bannerStationName">Station</span>
+                      <span class="station-meta" id="bannerStationMeta">Continuous Monitoring</span>
                     </div>
                     <div class="banner-right">
                       <div class="banner-aqi-pill" id="bannerAqiPill">
-                        <span id="bannerAqiVal">184</span>
-                        <span class="banner-aqi-label" id="bannerAqiCat">Unhealthy</span>
+                        <span id="bannerAqiVal">--</span>
+                        <span class="banner-aqi-label" id="bannerAqiCat">AQI</span>
                       </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Live Interactive MSN Stream View (Headless Chromium Stream) -->
-                <div id="msnMapWrapper" class="msn-map-wrapper" style="display: none;">
-                  <div class="msn-stream-viewport" id="msnStreamViewport">
-                    <img id="msnStreamImg" class="msn-stream-canvas" alt="Live MSN Weather Air Quality Map" draggable="false" />
-                    
-                    <!-- Live Loading Indicator -->
-                    <div id="msnStreamSpinner" class="msn-stream-spinner">
-                      <div class="stream-pulse-ring"></div>
-                      <span style="font-size: 13px; font-weight: 500; color: #fff;">Connecting to Live MSN Chromium Stream…</span>
-                    </div>
-
-                    <!-- Floating Zoom Controls -->
-                    <div class="msn-stream-controls">
-                      <button class="stream-btn" id="streamZoomInBtn" title="Zoom In">+</button>
-                      <div class="stream-btn-divider"></div>
-                      <button class="stream-btn" id="streamZoomOutBtn" title="Zoom Out">−</button>
-                    </div>
-                  </div>
-
-                  <!-- Live Stream HUD -->
-                  <div class="msn-stream-hud">
-                    <div class="hud-left">
-                      <span class="hud-live-dot"></span>
-                      <span class="hud-title">MSN LIVE RADAR</span>
-                      <span class="hud-timestamp" id="streamTimestamp">Connecting…</span>
-                    </div>
-                    <div class="hud-center">
-                      <span>Drag to pan • Scroll to zoom</span>
-                    </div>
-                    <div class="hud-right">
-                      <a href="https://www.msn.com/en-in/weather/maps/airquality?zoom=10" target="_blank" rel="noopener noreferrer" class="hud-ext-link">
-                        MSN ↗
-                      </a>
                     </div>
                   </div>
                 </div>
@@ -390,6 +430,127 @@
               <strong>Medical Disclaimer:</strong> VayuGuard estimates are based on public atmospheric models and pulmonary ventilation references. Consult your physician for medical management.
             </div>
             <button class="selector-chip active" id="closeMoreModalBtn" style="width: 100%; margin-top: 16px; padding: 12px;">Done</button>
+          </div>
+        </div>
+
+        <!-- Apple Hello-Style Animated Personalization Onboarding -->
+        <div class="modal-backdrop" id="profileModal">
+          <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px;">
+            
+            <!-- STEP 0: Welcome "Hello" Screen -->
+            <div class="onboard-step" id="onboardStep0">
+              <div style="text-align: center; max-width: 320px;">
+                <div class="onboard-hello-text">Personalize</div>
+                <p style="font-size: 16px; color: var(--text-muted); margin: 20px 0 32px; line-height: 1.5;">
+                  Wanna personalize AQI<br>about yourself?
+                </p>
+                <button class="onboard-cta-btn" onclick="onboardNext(1)">
+                  Yes, <span style="font-family: 'Georgia', 'Times New Roman', serif; font-style: italic; font-weight: 400;">absolutely</span>
+                </button>
+                <button class="onboard-skip-btn" onclick="closeProfileModal()">Maybe later</button>
+              </div>
+            </div>
+
+            <!-- STEP 1: Daily Work -->
+            <div class="onboard-step" id="onboardStep1">
+              <div style="width: 100%; max-width: 340px;">
+                <div class="onboard-step-num">1 / 4</div>
+                <h2 class="onboard-question">What is your daily work or routine?</h2>
+                <input type="text" id="qWorkRoutine" placeholder="Delivery rider, desk job, student, construction..."
+                  class="onboard-input" autofocus />
+                <button class="onboard-cta-btn" onclick="onboardNext(2)">Continue</button>
+              </div>
+            </div>
+
+            <!-- STEP 2: Outdoor Exposure -->
+            <div class="onboard-step" id="onboardStep2">
+              <div style="width: 100%; max-width: 340px;">
+                <div class="onboard-step-num">2 / 4</div>
+                <h2 class="onboard-question">How much time do you spend outdoors daily, and how do you commute?</h2>
+                <input type="text" id="qOutdoorCommute" placeholder="5 hours on motorbike, 45 mins walking..."
+                  class="onboard-input" />
+                <button class="onboard-cta-btn" onclick="onboardNext(3)">Continue</button>
+              </div>
+            </div>
+
+            <!-- STEP 3: Health -->
+            <div class="onboard-step" id="onboardStep3">
+              <div style="width: 100%; max-width: 340px;">
+                <div class="onboard-step-num">3 / 4</div>
+                <h2 class="onboard-question">Any pre-existing health conditions or allergies?</h2>
+                <input type="text" id="qHealthIssues" placeholder="Mild asthma, dust allergy, none..."
+                  class="onboard-input" />
+                <button class="onboard-cta-btn" onclick="onboardNext(4)">Continue</button>
+              </div>
+            </div>
+
+            <!-- STEP 4: Anything Else -->
+            <div class="onboard-step" id="onboardStep4">
+              <div style="width: 100%; max-width: 340px;">
+                <div class="onboard-step-num">4 / 4</div>
+                <h2 class="onboard-question">Anything else you wanna tell us?</h2>
+                <textarea id="qAnythingElse" rows="3" placeholder="Symptoms, medications, sensitive times of day..."
+                  class="onboard-input" style="resize: none; height: auto;"></textarea>
+                <button class="onboard-cta-btn" onclick="onboardSubmit()" id="letsGoBtn">Let's Go ✨</button>
+              </div>
+            </div>
+
+            <!-- STEP CLARIFY: Dynamic Clarifying Questions -->
+            <div class="onboard-step" id="onboardStepClarify">
+              <div style="width: 100%; max-width: 340px;">
+                <div class="onboard-step-num">Almost there</div>
+                <h2 class="onboard-question">To calibrate your personal advice accurately:</h2>
+                <div id="clarifyingQuestionsContainer" style="display: flex; flex-direction: column; gap: 14px; margin: 18px 0;"></div>
+                <button class="onboard-cta-btn" onclick="submitClarifiedAnswers()" id="clarifySubmitBtn">Save &amp; Evaluate ✨</button>
+                <button class="onboard-skip-btn" onclick="skipClarification()">Skip and evaluate now</button>
+              </div>
+            </div>
+
+            <!-- STEP 5: Result -->
+            <div class="onboard-step" id="onboardStep5">
+              <div style="width: 100%; max-width: 340px; text-align: center;">
+                <div class="onboard-hello-text" style="font-size: 28px;">All set ✨</div>
+                <div id="profileResultSection" style="margin: 24px 0; text-align: left;">
+                  <div id="profileResultText" style="font-size: 14px; color: var(--text-muted); line-height: 1.6; padding: 16px; background: rgba(255,255,255,0.04); border-radius: 16px; border: 1px solid var(--surface-border);"></div>
+                </div>
+                <button class="onboard-cta-btn" onclick="closeProfileModal()">Done</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Places Quick Picker Modal Sheet -->
+        <div class="modal-backdrop" id="placesModal" style="display: none;">
+          <div class="modal-sheet">
+            <div class="modal-handle"></div>
+            <h3 class="modal-title">Select Closer Location</h3>
+            <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 16px;">Search and choose a closer monitoring station or city:</p>
+            <div class="search-input-box" style="margin-bottom: 16px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="modalPlacesSearchInput" placeholder="Search Indian or global city…" />
+            </div>
+            <div class="city-tile-list" id="modalPlacesListContainer" style="max-height: 280px; overflow-y: auto;">
+              <!-- Dynamically populated city tiles -->
+            </div>
+            <button class="selector-chip active" id="closePlacesModalBtn" style="width: 100%; margin-top: 16px; padding: 12px;">Close</button>
+          </div>
+        </div>
+
+        <!-- Station Distance Warning Modal -->
+        <div class="station-distance-modal-backdrop" id="stationDistanceModal" style="display: none;">
+          <div class="station-distance-modal-card">
+            <div class="warning-badge-pill">⚠️ Station Distance Notice</div>
+            <h3 class="distance-modal-title">Official AQI Station is Far Away</h3>
+            <p class="distance-modal-desc" id="distanceModalDesc">The nearest continuous monitoring station (<strong id="distStationName">...</strong>) is <strong id="distStationKm">...</strong> km away from <strong id="distLocationName">...</strong>.</p>
+            <div class="distance-warning-callout">
+              <span class="warning-callout-icon">⚠️</span>
+              <div class="warning-callout-text"><strong>Data Inconsistency Warning:</strong> Air pollution levels can fluctuate sharply over short distances due to local traffic, wind currents, and micro-climates. Because this station is far away, readings may be inconsistent with your immediate surroundings and should be considered a regional estimate.</div>
+            </div>
+            <div class="distance-modal-actions">
+              <button class="btn-distance-continue" id="dismissDistanceModalBtn">I Understand, Continue</button>
+              <button class="btn-distance-change" id="changeCityFromDistanceBtn">Pick a Closer Location</button>
+            </div>
           </div>
         </div>
 

@@ -1,6 +1,10 @@
 # AirWise 🛡️
 > **Atmosphere first. Health guidance second. Detail on demand.**
 
+🌐 **Live Web Application:** [https://airwise-nine.vercel.app](https://airwise-nine.vercel.app)  
+[![Production Deployment](https://img.shields.io/badge/Deployment-Live%20on%20Vercel-black?style=flat&logo=vercel)](https://airwise-nine.vercel.app)
+[![API Status](https://img.shields.io/badge/API-Operational-success?style=flat)](https://airwise-nine.vercel.app/api/health)
+
 AirWise is a calm, glanceable environmental health and exposure intelligence platform.
 
 Instead of displaying generic AQI badges or overloaded medical dashboards, AirWise translates live atmospheric telemetry into **personalized biological inhalation dosage estimates ($\mu g$)** and discovers **lower-exposure activity windows** to protect respiratory and cardiovascular health.

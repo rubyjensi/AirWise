@@ -1,0 +1,71 @@
+/* Apple Developer Fonts Reference: https://developer.apple.com/fonts/ */
+@import url('https://fonts.cdnfonts.com/css/sf-pro-display');
+
+:root {
+  /* Core Colors */
+  --ink: #101114;
+  --paper: #F7F7F4;
+  --night: #0B1020;
+  --surface-dark: #171D2F;
+  --surface-dark-subtle: #1F273E;
+  --surface-border: rgba(255, 255, 255, 0.08);
+  --surface-border-subtle: rgba(255, 255, 255, 0.04);
+  
+  --text-main: #FFFFFF;
+  --text-muted: rgba(255, 255, 255, 0.70);
+  --text-tertiary: rgba(255, 255, 255, 0.45);
+
+  /* Status Colors */
+  --good: #28D777;
+  --moderate: #F2CF45;
+  --sensitive: #FF9F2F;
+  --unhealthy: #FF5B57;
+  --very-unhealthy: #A96CEB;
+  --hazardous: #7D294B;
+  --focus: #72A7FF;
+
+  /* Typography: Apple San Francisco (SF Pro) System Stack */
+  --font-system: -apple-system, BlinkMacSystemFont, "SF Pro", "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro", "Helvetica Neue", sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "Helvetica Neue", sans-serif;
+  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  --font-editorial-serif: "Copernicus", "Tiempos Headline", "Ivar Headline", "Georgia", "Times New Roman", serif;
+
+  /* Optical Tracking Rules from Apple HIG */
+  --tracking-hero: -0.035em;
+  --tracking-title: -0.022em;
+  --tracking-headline: -0.015em;
+  --tracking-body: -0.008em;
+  --tracking-caps: 0.05em;
+
+  /* Spacing Scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* Radii */
+  --radius-sheet: 28px;
+  --radius-card: 20px;
+  --radius-pill: 9999px;
+
+  /* Motion Tokens */
+  --motion-instant: 100ms;
+  --motion-fast: 180ms;
+  --motion-base: 320ms;
+  --motion-slow: 520ms;
+  --ease-standard: cubic-bezier(.2, .8, .2, 1);
+  --ease-emphasized: cubic-bezier(.16, 1, .3, 1);
+  --ease-exit: cubic-bezier(.4, 0, 1, 1);
+}
+ 
+.anthropic-serif-italic {
+  font-family: var(--font-editorial-serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--focus, #72A7FF);
+}

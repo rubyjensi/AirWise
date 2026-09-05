@@ -13,6 +13,8 @@ class StationMetadata(BaseModel):
     source: str
     is_modeled: bool = False
     confidence_level: str = "High"  # High, Medium, Limited
+    is_far: bool = False
+    warning: Optional[str] = None
 
 class CurrentWeather(BaseModel):
     temp_c: float
@@ -66,6 +68,15 @@ class HourlyItem(BaseModel):
     is_day: bool
     risk_score: float
 
+class CigaretteEquivalents(BaseModel):
+    cigarette_count: float
+    with_n95: float
+    full_day_cigarettes: float
+    headline_en: str
+    headline_hi: str
+    subtext_en: str
+    subtext_hi: str
+
 class HomeResponse(BaseModel):
     location_name: str
     latitude: float
@@ -76,8 +87,10 @@ class HomeResponse(BaseModel):
     station: StationMetadata
     contextual_sentence: Dict[str, str]  # en, hi
     personal_guidance: Dict[str, Any]
+    cigarette_equivalents: CigaretteEquivalents
     lower_exposure_window: LowerExposureWindow
     hourly: List[HourlyItem]
     nearby_stations: List[Dict[str, Any]] = []
     data_quality: Dict[str, Any]
     disclaimer: str
+

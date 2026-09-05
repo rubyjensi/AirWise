@@ -1,0 +1,1377 @@
+// VayuGuard Main Orchestrator
+import { state } from './state.js';
+import { fetchHomeData } from './api.js';
+import { speakAdvisory, stopSpeech } from './speech.js';
+import { renderHourlyStrip } from './charts.js';
+import { setupPlaces } from './places-map.js';
+import { MSNInteractiveStream } from './msn-interactive.js';
+
+// DOM Elements
+const canvasEl = document.getElementById('atmosphericCanvas');
+const tintLayerEl = document.getElementById('tintLayer');
+const locationLabelEl = document.getElementById('locationLabel');
+const contextSentenceEl = document.getElementById('contextSentence');
+const heroAqiEl = document.getElementById('heroAqi');
+const categoryPillEl = document.getElementById('categoryPill');
+const weatherTempEl = document.getElementById('weatherTemp');
+const weatherConditionEl = document.getElementById('weatherCondition');
+const stationInfoEl = document.getElementById('stationInfo');
+
+// Personal Guidance Elements
+const doseValEl = document.getElementById('doseVal');
+const guidanceActionEl = document.getElementById('guidanceAction');
+const guidanceWhyEl = document.getElementById('guidanceWhy');
+const listenBtn = document.getElementById('listenBtn');
+const listenBtnText = document.getElementById('listenBtnText');
+
+// Plan Screen Elements
+const planWindowTimeEl = document.getElementById('planWindowTime');
+const planReasonEl = document.getElementById('planReason');
+const hourlyContainerEl = document.getElementById('hourlyContainer');
+
+// Modals
+const infoModal = document.getElementById('infoModal');
+const moreModal = document.getElementById('moreModal');
+const assumptionsListEl = document.getElementById('assumptionsList');
+
+// Desktop QR Code Element
+const qrImageEl = document.getElementById('desktopQrImage');
+
+// Service Worker Registration for PWA
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => {
+      console.warn('PWA Service Worker registration failed:', err);
+    });
+  });
+}
+
+// 1. Data Fetch & UI Update
+async function loadData(isUserAction = false) {
+  try {
+    state.set({ loading: true });
+    const data = await fetchHomeData(
+      state.location.lat,
+      state.location.lon,
+      state.profile,
+      state.activity,
+      state.duration,
+      state.location.name
+    );
+    state.set({ homeData: data, loading: false });
+    renderApp(data, isUserAction);
+
+    // Automatic Location Updates for Doctor Advice
+    if (data && data.location_name) {
+      const saved = localStorage.getItem('airwise_profile');
+      if (saved) {
+        try {
+          const p = JSON.parse(saved);
+          if (p.last_city !== data.location_name) {
+            const doctorNoteText = document.getElementById('doctorNoteText');
+            if (doctorNoteText && data.air_quality) {
+              doctorNoteText.textContent = `As your doctor, looking at your routine in ${data.location_name} (${data.air_quality.category} • AQI ${data.air_quality.aqi})...`;
+            }
+            refreshProfileForLocation(data);
+          }
+        } catch (e) {
+          console.warn('Failed to evaluate location change for profile:', e);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load telemetry:', err);
+    state.set({ loading: false });
+  }
+}
+
+// 2. Render UI from State
+function renderApp(dataOverride, isUserAction = false) {
+  const d = dataOverride || state.homeData;
+  if (!d) return;
+
+  const lang = state.lang;
+
+  // Atmospheric Canvas & Tint
+  canvasEl.className = `atmospheric-canvas scene-${d.scene}`;
+  const catKey = d.air_quality.category.toLowerCase().replace(/\s+/g, '-');
+  tintLayerEl.className = `aqi-tint-layer tint-${catKey}`;
+
+  // Top Nav
+  locationLabelEl.textContent = d.location_name;
+
+  // Hero Section
+  contextSentenceEl.textContent = d.contextual_sentence[lang] || d.contextual_sentence['en'];
+  heroAqiEl.textContent = d.air_quality.aqi;
+  
+  categoryPillEl.textContent = d.air_quality.category;
+  categoryPillEl.className = `category-pill cat-${catKey}`;
+
+  weatherTempEl.textContent = `${Math.round(d.weather.temp_c)}°C`;
+  weatherConditionEl.textContent = `${d.weather.condition_text} • Feels ${Math.round(d.weather.feels_like_c)}°C`;
+
+  const isFarStation = Boolean(d.station && (d.station.is_far || (typeof d.station.distance_km === 'number' && d.station.distance_km > 15.0)));
+  const distKmStr = d.station && typeof d.station.distance_km === 'number' ? Number(d.station.distance_km).toFixed(1) : '--';
+
+  if (isFarStation) {
+    stationInfoEl.className = 'station-pill is-far';
+    stationInfoEl.innerHTML = `
+      <span class="station-dot"></span>
+      <span>${d.station.name} • <span class="station-warning-badge">(Station ${distKmStr} km away — Regional estimate)</span> • updated ${d.station.updated_minutes_ago}m ago</span>
+    `;
+  } else {
+    stationInfoEl.className = 'station-pill';
+    stationInfoEl.innerHTML = `
+      <span class="station-dot"></span>
+      <span>${d.station.name} • ${distKmStr} km away • updated ${d.station.updated_minutes_ago}m ago</span>
+    `;
+  }
+
+  // Station Distance Pop-up Warning:
+  // If (d.station && (d.station.is_far || d.station.distance_km > 15.0)) and the location was just chosen or changed by user:
+  if (isFarStation && isUserAction) {
+    const modal = document.getElementById('stationDistanceModal');
+    const distStationName = document.getElementById('distStationName');
+    const distStationKm = document.getElementById('distStationKm');
+    const distLocationName = document.getElementById('distLocationName');
+
+    if (distStationName) distStationName.textContent = d.station.name || 'Monitoring Station';
+    if (distStationKm) distStationKm.textContent = distKmStr;
+    if (distLocationName) distLocationName.textContent = d.location_name || state.location.name || 'your location';
+
+    if (modal) {
+      modal.style.display = 'flex';
+    }
+  }
+
+  // Personal Guidance Card
+  const pg = d.personal_guidance;
+  doseValEl.textContent = pg.dose_range_str;
+  guidanceActionEl.textContent = pg.guidance_text[lang] || pg.guidance_text['en'];
+  guidanceWhyEl.textContent = pg.why_text[lang] || pg.why_text['en'];
+
+  // Render Cigarette Equivalents
+  const cigValEl = document.getElementById('cigVal');
+  const cigN95PillEl = document.getElementById('cigN95Pill');
+  if (d.cigarette_equivalents) {
+    const ce = d.cigarette_equivalents;
+    if (cigValEl) {
+      cigValEl.textContent = ce.cigarette_count != null ? ce.cigarette_count : '0.0';
+    }
+    if (cigN95PillEl) {
+      cigN95PillEl.textContent = `With N95 Mask: ~${ce.with_n95 != null ? ce.with_n95 : '0.0'} cigs (-90%)`;
+    }
+    if (guidanceActionEl) {
+      if (lang === 'hi' && ce.headline_hi) {
+        guidanceActionEl.textContent = ce.headline_hi;
+      } else if (ce.headline_en) {
+        guidanceActionEl.textContent = ce.headline_en;
+      } else {
+        guidanceActionEl.textContent = `Cardiovascular & mortality risk equivalent to smoking ~${ce.cigarette_count} cigarettes.`;
+      }
+    }
+  }
+
+  // Apply custom personalized profile if user has created one
+  updatePersonalExposureCard(d);
+
+  // Plan Screen
+  const plan = d.lower_exposure_window;
+  if (plan.has_better_window) {
+    planWindowTimeEl.textContent = plan.window_label;
+    planReasonEl.textContent = lang === 'hi' ? plan.reason_hi : plan.reason_en;
+  } else {
+    planWindowTimeEl.textContent = lang === 'hi' ? 'कोई बड़ा अंतर नहीं' : 'Consistent conditions';
+    planReasonEl.textContent = lang === 'hi' ? plan.reason_hi : plan.reason_en;
+  }
+
+  // Hourly Strip
+  renderHourlyStrip(hourlyContainerEl, d.hourly, (selectedHour) => {
+    // Scrub update callback
+    console.log('Scrubbed to hour:', selectedHour.hour_display, selectedHour.aqi);
+  });
+
+  // Update QR Code with current URL
+  if (qrImageEl) {
+    const currentUrl = window.location.href;
+    qrImageEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(currentUrl)}`;
+  }
+
+  // Update Regional Air Quality Map
+  updateAirQualityMap(d);
+}
+
+// Leaflet Air Quality Radar Map (MSN Weather Style)
+let leafletMap = null;
+let stationMarkersGroup = null;
+let userMarker = null;
+let atmosphericHeatCircle = null;
+
+function getAqiHexColor(aqi) {
+  if (aqi <= 50) return '#2ea043';
+  if (aqi <= 100) return '#d29922';
+  if (aqi <= 150) return '#db6d28';
+  if (aqi <= 200) return '#f85149';
+  if (aqi <= 300) return '#bc8cff';
+  return '#8b1e1e';
+}
+
+let msnStream = null;
+
+function initAirQualityMap() {
+  const mapContainer = document.getElementById('airQualityLeafletMap');
+  if (!mapContainer || typeof L === 'undefined') return;
+
+  const radarMapWrapper = document.getElementById('radarMapWrapper');
+  if (radarMapWrapper) {
+    radarMapWrapper.style.display = 'block';
+  }
+
+  if (leafletMap) {
+    setTimeout(() => leafletMap.invalidateSize(), 50);
+    return;
+  }
+
+  const lat = state.location?.lat || 28.6139;
+  const lon = state.location?.lon || 77.2090;
+
+  leafletMap = L.map('airQualityLeafletMap', {
+    zoomControl: false,
+    attributionControl: true,
+    scrollWheelZoom: false,
+    tap: true
+  }).setView([lat, lon], 10);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd',
+    maxZoom: 18,
+    attribution: '&copy; CARTO &copy; OpenStreetMap'
+  }).addTo(leafletMap);
+
+  stationMarkersGroup = L.layerGroup().addTo(leafletMap);
+
+  document.getElementById('mapRecenterBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (leafletMap && state.homeData) {
+      leafletMap.flyTo([state.homeData.latitude, state.homeData.longitude], 10, { duration: 0.8 });
+    }
+  });
+
+  document.getElementById('mapZoomInBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (leafletMap) leafletMap.zoomIn();
+  });
+
+  document.getElementById('mapZoomOutBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (leafletMap) leafletMap.zoomOut();
+  });
+
+  setTimeout(() => {
+    if (leafletMap) leafletMap.invalidateSize();
+  }, 100);
+}
+
+function updateAirQualityMap(d) {
+  if (!d) return;
+  const lat = d.latitude;
+  const lon = d.longitude;
+  const aqi = d.air_quality.aqi;
+
+  // Update External Map Links
+  const openMeteoExternalLink = document.getElementById('openMeteoExternalLink') || document.getElementById('aqiInExternalLink');
+  if (openMeteoExternalLink) {
+    openMeteoExternalLink.href = 'https://open-meteo.com';
+  }
+  const msnExternalLink = document.getElementById('msnExternalLink');
+  if (msnExternalLink) {
+    msnExternalLink.href = `https://www.msn.com/en-in/weather/maps/airquality?zoom=10&lat=${lat}&lon=${lon}`;
+  }
+
+  if (msnStream && d) {
+    msnStream.navigateTo(lat, lon, 10);
+  }
+
+  if (!leafletMap) {
+    initAirQualityMap();
+  }
+  if (!leafletMap) return;
+
+  leafletMap.setView([lat, lon], 10);
+
+  // Update user live location marker
+  if (userMarker) {
+    userMarker.setLatLng([lat, lon]);
+  } else {
+    const userIcon = L.divIcon({
+      className: 'user-marker-container',
+      html: '<div class="user-location-marker"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8]
+    });
+    userMarker = L.marker([lat, lon], { icon: userIcon, zIndexOffset: 1000 }).addTo(leafletMap);
+    userMarker.bindTooltip("You are here", { direction: 'top', offset: [0, -8] });
+  }
+
+  // Atmospheric Dispersion Plume Overlay (MSN Weather Style)
+  if (atmosphericHeatCircle) {
+    leafletMap.removeLayer(atmosphericHeatCircle);
+  }
+
+  const plumeColor = getAqiHexColor(aqi);
+  atmosphericHeatCircle = L.circle([lat, lon], {
+    radius: 14000,
+    color: plumeColor,
+    fillColor: plumeColor,
+    fillOpacity: 0.16,
+    weight: 1.5,
+    dashArray: '4, 6'
+  }).addTo(leafletMap);
+
+  // Nearby monitoring stations
+  if (stationMarkersGroup) {
+    stationMarkersGroup.clearLayers();
+  }
+
+  const stations = d.nearby_stations || [];
+  const banner = document.getElementById('mapStationBanner');
+  const bannerName = document.getElementById('bannerStationName');
+  const bannerMeta = document.getElementById('bannerStationMeta');
+  const bannerVal = document.getElementById('bannerAqiVal');
+  const bannerCat = document.getElementById('bannerAqiCat');
+  const bannerPill = document.getElementById('bannerAqiPill');
+
+  stations.forEach((st) => {
+    const catClass = st.category.toLowerCase().replace(/\s+/g, '-');
+    const markerIcon = L.divIcon({
+      className: 'aqi-pin-wrap',
+      html: `<div class="aqi-map-pin pin-${catClass}">${st.aqi}</div>`,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16]
+    });
+
+    const marker = L.marker([st.lat, st.lon], { icon: markerIcon });
+    marker.on('click', () => {
+      if (banner) {
+        banner.style.display = 'flex';
+        bannerName.textContent = st.name;
+        bannerMeta.textContent = `${st.distance_km.toFixed(1)} km away • ${st.source}`;
+        bannerVal.textContent = st.aqi;
+        bannerCat.textContent = st.category;
+        if (bannerPill) bannerPill.style.background = getAqiHexColor(st.aqi);
+      }
+      leafletMap.panTo([st.lat, st.lon]);
+    });
+
+    stationMarkersGroup.addLayer(marker);
+  });
+
+  // Default selection to nearest station
+  if (stations.length > 0 && banner) {
+    const nearest = stations[0];
+    banner.style.display = 'flex';
+    bannerName.textContent = nearest.name;
+    bannerMeta.textContent = `${nearest.distance_km.toFixed(1)} km away • ${nearest.source}`;
+    bannerVal.textContent = nearest.aqi;
+    bannerCat.textContent = nearest.category;
+    if (bannerPill) bannerPill.style.background = getAqiHexColor(nearest.aqi);
+  }
+
+  const subEl = document.getElementById('mapLocationSubtitle');
+  if (subEl) {
+    subEl.textContent = `${d.location_name} regional monitoring grid`;
+  }
+
+  setTimeout(() => {
+    if (leafletMap) leafletMap.invalidateSize();
+  }, 250);
+}
+
+// 3. Setup Navigation & Event Listeners
+function setupEvents() {
+  // Bottom Tab Navigation
+  const tabBtns = document.querySelectorAll('.nav-tab-btn');
+  const viewPages = document.querySelectorAll('.view-page');
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetView = btn.dataset.view;
+      if (!targetView) return;
+
+      tabBtns.forEach(b => b.classList.remove('active'));
+      viewPages.forEach(p => p.classList.remove('active'));
+
+      btn.classList.add('active');
+      document.getElementById(`view-${targetView}`).classList.add('active');
+      state.set({ currentView: targetView });
+
+      if (targetView === 'now' && leafletMap) {
+        setTimeout(() => leafletMap.invalidateSize(), 150);
+      }
+    });
+  });
+
+  // GPS Location Trigger
+  const gpsBtn = document.getElementById('gpsBtn');
+  if (gpsBtn) {
+    gpsBtn.addEventListener('click', () => {
+      if (!('geolocation' in navigator)) {
+        alert('Geolocation is not supported by your browser.');
+        return;
+      }
+      locationLabelEl.textContent = 'Locating…';
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          let exactName = `${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}`;
+          try {
+            const geoRes = await fetch(`/api/reverse-geocode?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`);
+            if (geoRes.ok) {
+              const geoData = await geoRes.json();
+              exactName = geoData.name || exactName;
+            }
+          } catch (e) {
+            console.warn('Reverse geocode error:', e);
+          }
+          state.set({
+            location: {
+              lat: pos.coords.latitude,
+              lon: pos.coords.longitude,
+              name: exactName
+            }
+          });
+          locationLabelEl.textContent = exactName;
+          loadData(true);
+        },
+        (err) => {
+          console.warn('GPS location access denied/failed:', err);
+          locationLabelEl.textContent = state.location.name;
+          alert('Location permission was not granted. You can pick any city from the Places tab.');
+        },
+        { timeout: 8000, enableHighAccuracy: true }
+      );
+    });
+  }
+
+  // Language Toggle Button
+  const langToggleBtn = document.getElementById('langToggleBtn');
+  if (langToggleBtn) {
+    langToggleBtn.addEventListener('click', () => {
+      const nextLang = state.lang === 'en' ? 'hi' : 'en';
+      state.set({ lang: nextLang });
+      langToggleBtn.textContent = nextLang === 'en' ? 'HI' : 'EN';
+      renderApp();
+    });
+    langToggleBtn.textContent = state.lang === 'en' ? 'HI' : 'EN';
+  }
+
+  // Activity Selectors
+  const actChips = document.querySelectorAll('.activity-chip');
+  actChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      actChips.forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      state.set({ activity: chip.dataset.act });
+      loadData();
+    });
+  });
+
+  // Duration Selectors
+  const durChips = document.querySelectorAll('.duration-chip');
+  durChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      durChips.forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      state.set({ duration: parseInt(chip.dataset.dur, 10) });
+      loadData();
+    });
+  });
+
+  // Bilingual Speech Synthesis Button (Personal Doctor Briefing)
+  if (listenBtn) {
+    let speaking = false;
+    listenBtn.addEventListener('click', () => {
+      if (speaking) {
+        stopSpeech();
+        speaking = false;
+        listenBtnText.textContent = state.lang === 'hi' ? 'सुनिए' : 'Listen';
+        return;
+      }
+
+      const d = state.homeData;
+      if (!d) return;
+
+      const lang = state.lang || 'en';
+      let textToSpeak = '';
+
+      const saved = localStorage.getItem('airwise_profile');
+      let p = null;
+      if (saved) {
+        try { p = JSON.parse(saved); } catch(e) {}
+      }
+
+      if (lang === 'hi') {
+        if (p && p.personalized_tips && p.personalized_tips.length > 0) {
+          const evalNote = p.hindi_evaluation || p.clinical_evaluation || (d.contextual_sentence && d.contextual_sentence['hi']) || '';
+          const tipsSpoken = p.personalized_tips.slice(0, 3).map((t, idx) => `सलाह ${idx + 1}: ${t}`).join('. ');
+          const gearSpoken = p.protective_gear_recommendation ? `सुरक्षा उपकरण: ${p.protective_gear_recommendation}.` : '';
+          const commuteSpoken = p.commute_advisory ? `यात्रा सलाह: ${p.commute_advisory}.` : '';
+          textToSpeak = `नमस्ते, मैं डॉ. एयरवाइज़ हूँ, आपकी व्यक्तिगत स्वास्थ्य ब्रीफिंग के साथ। आज का वायु गुणवत्ता सूचकांक ${d.aqi} है। ${evalNote} आज के लिए मेरी मेडिकल प्रिस्क्रिप्शन: ${tipsSpoken}. ${gearSpoken} ${commuteSpoken} कृपया सावधानी बरतें और अपने फेफड़ों का ख्याल रखें।`;
+        } else {
+          const context = (d.contextual_sentence && d.contextual_sentence['hi']) || '';
+          const guidance = (d.personal_guidance && d.personal_guidance.guidance_text && d.personal_guidance.guidance_text['hi']) || '';
+          textToSpeak = `नमस्ते, मैं डॉ. एयरवाइज़ हूँ, आपकी दैनिक वायु गुणवत्ता स्वास्थ्य ब्रीफिंग के साथ। आज का वायु गुणवत्ता सूचकांक ${d.aqi} है। ${context} ${guidance} मेरी सलाह है कि बाहर जाते समय एन-95 मास्क का प्रयोग करें और भारी व्यायाम से बचें। सुरक्षित रहें।`;
+        }
+      } else {
+        if (p && p.personalized_tips && p.personalized_tips.length > 0) {
+          const evalNote = p.clinical_evaluation || (d.contextual_sentence && d.contextual_sentence['en']) || '';
+          const tipsSpoken = p.personalized_tips.slice(0, 3).map((t, idx) => `Tip ${idx + 1}: ${t}`).join('. ');
+          const gearSpoken = p.protective_gear_recommendation ? `Recommended gear: ${p.protective_gear_recommendation}.` : '';
+          const commuteSpoken = p.commute_advisory ? `Commute advisory: ${p.commute_advisory}.` : '';
+          textToSpeak = `Hello, this is your personal doctor with your AirWise medical briefing. Today's AQI is ${d.aqi}, placing your area in the ${d.aqi_category || 'unhealthy'} tier. ${evalNote} Here is your clinical prescription for today. ${tipsSpoken}. ${gearSpoken} ${commuteSpoken} Please breathe carefully and protect your respiratory health today.`;
+        } else {
+          const context = (d.contextual_sentence && d.contextual_sentence['en']) || '';
+          const guidance = (d.personal_guidance && d.personal_guidance.guidance_text && d.personal_guidance.guidance_text['en']) || '';
+          textToSpeak = `Hello, this is your personal doctor with your daily environmental health briefing. Today's air quality index is ${d.aqi}. ${context} ${guidance} My primary prescription: minimize strenuous outdoor exertion, keep indoor air filtered, and wear a fitted respirator outdoors. Take care of your lungs today.`;
+        }
+      }
+
+      speaking = true;
+      listenBtnText.textContent = lang === 'hi' ? 'रोकें' : 'Stop';
+
+      speakAdvisory(textToSpeak, lang, () => {
+        speaking = false;
+        listenBtnText.textContent = lang === 'hi' ? 'सुनिए' : 'Listen';
+      });
+    });
+  }
+
+  // Clinical Formula Modal
+  const howItWorksBtn = document.getElementById('howItWorksBtn');
+  const closeInfoModalBtn = document.getElementById('closeInfoModalBtn');
+  if (howItWorksBtn && infoModal) {
+    howItWorksBtn.addEventListener('click', () => {
+      const d = state.homeData;
+      if (d && d.personal_guidance) {
+        assumptionsListEl.innerHTML = d.personal_guidance.assumptions.map(a => `<li>${a}</li>`).join('');
+      }
+      infoModal.classList.add('open');
+    });
+  }
+  if (closeInfoModalBtn && infoModal) {
+    closeInfoModalBtn.addEventListener('click', () => {
+      infoModal.classList.remove('open');
+    });
+  }
+
+  // More Sheet Modal
+  const moreBtn = document.getElementById('moreBtn');
+  const closeMoreModalBtn = document.getElementById('closeMoreModalBtn');
+  if (moreBtn && moreModal) {
+    moreBtn.addEventListener('click', () => {
+      moreModal.classList.add('open');
+    });
+  }
+  if (closeMoreModalBtn && moreModal) {
+    closeMoreModalBtn.addEventListener('click', () => {
+      moreModal.classList.remove('open');
+    });
+  }
+
+  // Profile Selection in More Sheet
+  const profileRadios = document.querySelectorAll('input[name="profileOption"]');
+  profileRadios.forEach(radio => {
+    if (radio.value === state.profile) radio.checked = true;
+    radio.addEventListener('change', (e) => {
+      state.set({ profile: e.target.value });
+      loadData();
+    });
+  });
+
+  // Station Distance Warning Modal Wiring
+  const stationDistanceModal = document.getElementById('stationDistanceModal');
+  const dismissDistanceModalBtn = document.getElementById('dismissDistanceModalBtn');
+  const changeCityFromDistanceBtn = document.getElementById('changeCityFromDistanceBtn');
+
+  if (dismissDistanceModalBtn && stationDistanceModal) {
+    dismissDistanceModalBtn.onclick = () => {
+      stationDistanceModal.style.display = 'none';
+    };
+  }
+
+  if (changeCityFromDistanceBtn && stationDistanceModal) {
+    changeCityFromDistanceBtn.onclick = () => {
+      stationDistanceModal.style.display = 'none';
+      const placesModal = document.getElementById('placesModal');
+      if (placesModal) {
+        placesModal.style.display = 'block';
+        placesModal.classList.add('open');
+      }
+      const placesTabBtn = document.querySelector('.nav-tab-btn[data-view="places"]');
+      if (placesTabBtn) {
+        placesTabBtn.click();
+      }
+    };
+  }
+
+  if (stationDistanceModal) {
+    stationDistanceModal.addEventListener('click', (e) => {
+      if (e.target === stationDistanceModal) {
+        stationDistanceModal.style.display = 'none';
+      }
+    });
+  }
+
+  // Places Quick Picker Modal Setup
+  const placesModal = document.getElementById('placesModal');
+  const closePlacesModalBtn = document.getElementById('closePlacesModalBtn');
+  const modalPlacesSearchInput = document.getElementById('modalPlacesSearchInput');
+  const modalPlacesListContainer = document.getElementById('modalPlacesListContainer');
+
+  if (closePlacesModalBtn && placesModal) {
+    closePlacesModalBtn.onclick = () => {
+      placesModal.classList.remove('open');
+      placesModal.style.display = 'none';
+    };
+  }
+  if (placesModal) {
+    placesModal.addEventListener('click', (e) => {
+      if (e.target === placesModal) {
+        placesModal.classList.remove('open');
+        placesModal.style.display = 'none';
+      }
+    });
+  }
+  if (modalPlacesSearchInput && modalPlacesListContainer) {
+    setupPlaces(modalPlacesSearchInput, modalPlacesListContainer, (city) => {
+      if (placesModal) {
+        placesModal.classList.remove('open');
+        placesModal.style.display = 'none';
+      }
+      state.set({
+        location: {
+          lat: city.lat,
+          lon: city.lon,
+          name: `${city.name}, ${city.state || city.country}`
+        },
+        currentView: 'now'
+      });
+      tabBtns.forEach(b => b.classList.remove('active'));
+      viewPages.forEach(p => p.classList.remove('active'));
+      document.querySelector('.nav-tab-btn[data-view="now"]').classList.add('active');
+      document.getElementById('view-now').classList.add('active');
+      loadData(true);
+    });
+  }
+
+  // Places Screen Setup
+  const placesSearchInput = document.getElementById('placesSearchInput');
+  const placesListContainer = document.getElementById('placesListContainer');
+  if (placesSearchInput && placesListContainer) {
+    setupPlaces(placesSearchInput, placesListContainer, (city) => {
+      state.set({
+        location: {
+          lat: city.lat,
+          lon: city.lon,
+          name: `${city.name}, ${city.state || city.country}`
+        },
+        currentView: 'now'
+      });
+      // Switch back to Now tab
+      tabBtns.forEach(b => b.classList.remove('active'));
+      viewPages.forEach(p => p.classList.remove('active'));
+      document.querySelector('.nav-tab-btn[data-view="now"]').classList.add('active');
+      document.getElementById('view-now').classList.add('active');
+      loadData(true);
+    });
+  }
+}
+
+// Bootstrap
+document.addEventListener('DOMContentLoaded', () => {
+  setupEvents();
+  setupProfileModal();
+  loadData();
+  loadSavedProfile();
+});
+
+// ==============================================
+// Apple Hello-Style Animated Profile Onboarding
+// ==============================================
+
+let currentOnboardStep = 0;
+const profileModal = document.getElementById('profileModal');
+const profileResultText = document.getElementById('profileResultText');
+
+function setupProfileModal() {
+  const profilesBtn = document.getElementById('profilesBtn');
+  if (profilesBtn) {
+    profilesBtn.addEventListener('click', () => {
+      openProfileModal();
+    });
+  }
+}
+
+function openProfileModal() {
+  if (!profileModal) return;
+  state._clarificationDone = false;
+  currentOnboardStep = 0;
+  document.querySelectorAll('.onboard-step').forEach(s => {
+    s.classList.remove('active', 'exit');
+  });
+  const step0 = document.getElementById('onboardStep0');
+  if (step0) step0.classList.add('active');
+  profileModal.classList.add('open');
+}
+
+function closeProfileModal() {
+  if (profileModal) profileModal.classList.remove('open');
+}
+
+function onboardNext(nextStep) {
+  const current = document.getElementById(`onboardStep${currentOnboardStep}`);
+  const next = document.getElementById(`onboardStep${nextStep}`);
+  if (!current || !next) return;
+
+  current.classList.remove('active');
+  current.classList.add('exit');
+
+  setTimeout(() => {
+    current.classList.remove('exit');
+    next.classList.add('active');
+    currentOnboardStep = nextStep;
+    const input = next.querySelector('input, textarea');
+    if (input) setTimeout(() => input.focus(), 100);
+  }, 350);
+}
+
+function checkAnswersNeedClarification(work, outdoor, health, extra) {
+  const combined = [work, outdoor, health, extra].filter(Boolean).join(' ');
+  const words = combined.trim().split(/\s+/).filter(w => w.length > 0);
+  const totalWords = words.length;
+
+  // Check if outdoor has numbers/hours
+  const hasHours = /\d+/.test(outdoor || '');
+
+  // Check if work has context (>8 chars)
+  const workHasContext = (work || '').trim().length > 8;
+
+  // Check if health has specifics (>6 chars)
+  const healthHasSpecifics = (health || '').trim().length > 6;
+
+  const missingHours = !hasHours;
+  const missingHealth = !healthHasSpecifics;
+  const missingWorkContext = !workHasContext;
+
+  const needsClarification = Boolean(
+    (totalWords < 12 || (missingHours && missingHealth)) && !state._clarificationDone
+  );
+
+  return {
+    needsClarification,
+    totalWords,
+    missingHours,
+    missingHealth,
+    missingWorkContext
+  };
+}
+
+function buildClarifyingQuestions(analysis) {
+  const container = document.getElementById('clarifyingQuestionsContainer');
+  if (!container) return;
+
+  container.innerHTML = '';
+  let count = 0;
+
+  if (analysis.missingHours && count < 2) {
+    const item = document.createElement('div');
+    item.className = 'clarify-item';
+    item.style.marginBottom = '14px';
+    item.innerHTML = `
+      <label style="display: block; font-size: 13px; font-weight: 500; color: var(--text-primary, #fff); margin-bottom: 6px;">
+        Roughly how many hours are you on the road or outdoors daily?
+      </label>
+      <input type="text" id="qClarifyHours" placeholder="e.g. 2 hours commuting, 45 mins walking..." class="onboard-input" />
+    `;
+    container.appendChild(item);
+    count++;
+  }
+
+  if (analysis.missingWorkContext && count < 2) {
+    const item = document.createElement('div');
+    item.className = 'clarify-item';
+    item.style.marginBottom = '14px';
+    item.innerHTML = `
+      <label style="display: block; font-size: 13px; font-weight: 500; color: var(--text-primary, #fff); margin-bottom: 6px;">
+        Is your daily workplace air-conditioned or exposed to outdoor air?
+      </label>
+      <input type="text" id="qClarifyEnv" placeholder="e.g. AC office, open workshop, outdoor delivery..." class="onboard-input" />
+    `;
+    container.appendChild(item);
+    count++;
+  }
+
+  if (analysis.missingHealth && count < 2) {
+    const item = document.createElement('div');
+    item.className = 'clarify-item';
+    item.style.marginBottom = '14px';
+    item.innerHTML = `
+      <label style="display: block; font-size: 13px; font-weight: 500; color: var(--text-primary, #fff); margin-bottom: 6px;">
+        Do you notice symptoms like burning eyes, cough, or fatigue during high AQI?
+      </label>
+      <input type="text" id="qClarifySymptoms" placeholder="e.g. burning eyes, mild dry cough, none..." class="onboard-input" />
+    `;
+    container.appendChild(item);
+    count++;
+  }
+
+  if (count === 0) {
+    const item = document.createElement('div');
+    item.className = 'clarify-item';
+    item.style.marginBottom = '14px';
+    item.innerHTML = `
+      <label style="display: block; font-size: 13px; font-weight: 500; color: var(--text-primary, #fff); margin-bottom: 6px;">
+        Do you notice symptoms like burning eyes, cough, or fatigue during high AQI?
+      </label>
+      <input type="text" id="qClarifySymptoms" placeholder="e.g. burning eyes, dry cough, none..." class="onboard-input" />
+    `;
+    container.appendChild(item);
+  }
+}
+
+async function onboardSubmit() {
+  const qWork = document.getElementById('qWorkRoutine')?.value?.trim() || '';
+  const qOutdoor = document.getElementById('qOutdoorCommute')?.value?.trim() || '';
+  const qHealth = document.getElementById('qHealthIssues')?.value?.trim() || '';
+  const qExtra = document.getElementById('qAnythingElse')?.value?.trim() || '';
+
+  const profileText = [
+    qWork ? `Daily work/routine: ${qWork}` : '',
+    qOutdoor ? `Outdoor exposure & commute: ${qOutdoor}` : '',
+    qHealth ? `Health conditions/allergies: ${qHealth}` : '',
+    qExtra ? `Additional info: ${qExtra}` : ''
+  ].filter(Boolean).join('. ');
+
+  if (!profileText) {
+    onboardNext(5);
+    if (profileResultText) profileResultText.innerHTML = '<p>No answers provided. You can redo this anytime from the 👤 button.</p>';
+    return;
+  }
+
+  // Check if answers need clarification
+  const clarifyAnalysis = checkAnswersNeedClarification(qWork, qOutdoor, qHealth, qExtra);
+  const clarifyStepEl = document.getElementById('onboardStepClarify');
+
+  if (clarifyAnalysis.needsClarification && clarifyStepEl) {
+    buildClarifyingQuestions(clarifyAnalysis);
+    onboardNext('Clarify');
+    return;
+  }
+
+  await executeProfileEvaluation(qWork, qOutdoor, qHealth, qExtra);
+}
+
+async function submitClarifiedAnswers() {
+  state._clarificationDone = true;
+
+  const clarifyHours = document.getElementById('qClarifyHours')?.value?.trim() || '';
+  const clarifyEnv = document.getElementById('qClarifyEnv')?.value?.trim() || '';
+  const clarifySymptoms = document.getElementById('qClarifySymptoms')?.value?.trim() || '';
+
+  let qWork = document.getElementById('qWorkRoutine')?.value?.trim() || '';
+  let qOutdoor = document.getElementById('qOutdoorCommute')?.value?.trim() || '';
+  let qHealth = document.getElementById('qHealthIssues')?.value?.trim() || '';
+  let qExtra = document.getElementById('qAnythingElse')?.value?.trim() || '';
+
+  if (clarifyHours) {
+    qOutdoor += (qOutdoor ? ` (${clarifyHours})` : clarifyHours);
+  }
+  if (clarifyEnv) {
+    qWork += (qWork ? ` (${clarifyEnv})` : clarifyEnv);
+  }
+  if (clarifySymptoms) {
+    qHealth += (qHealth ? ` (${clarifySymptoms})` : clarifySymptoms);
+  }
+
+  if (document.getElementById('qOutdoorCommute') && clarifyHours) {
+    document.getElementById('qOutdoorCommute').value = qOutdoor;
+  }
+  if (document.getElementById('qWorkRoutine') && clarifyEnv) {
+    document.getElementById('qWorkRoutine').value = qWork;
+  }
+  if (document.getElementById('qHealthIssues') && clarifySymptoms) {
+    document.getElementById('qHealthIssues').value = qHealth;
+  }
+
+  await executeProfileEvaluation(qWork, qOutdoor, qHealth, qExtra);
+}
+
+async function skipClarification() {
+  state._clarificationDone = true;
+
+  const qWork = document.getElementById('qWorkRoutine')?.value?.trim() || '';
+  const qOutdoor = document.getElementById('qOutdoorCommute')?.value?.trim() || '';
+  const qHealth = document.getElementById('qHealthIssues')?.value?.trim() || '';
+  const qExtra = document.getElementById('qAnythingElse')?.value?.trim() || '';
+
+  await executeProfileEvaluation(qWork, qOutdoor, qHealth, qExtra);
+}
+
+async function executeProfileEvaluation(qWork, qOutdoor, qHealth, qExtra) {
+  const profileText = [
+    qWork ? `Daily work/routine: ${qWork}` : '',
+    qOutdoor ? `Outdoor exposure & commute: ${qOutdoor}` : '',
+    qHealth ? `Health conditions/allergies: ${qHealth}` : '',
+    qExtra ? `Additional info: ${qExtra}` : ''
+  ].filter(Boolean).join('. ');
+
+  if (!profileText) {
+    onboardNext(5);
+    if (profileResultText) profileResultText.innerHTML = '<p>No answers provided. You can redo this anytime from the 👤 button.</p>';
+    return;
+  }
+
+  const btn = document.getElementById('letsGoBtn');
+  const clarifyBtn = document.getElementById('clarifySubmitBtn');
+  if (btn) { btn.textContent = 'Analyzing...'; btn.style.opacity = '0.6'; btn.style.pointerEvents = 'none'; }
+  if (clarifyBtn) { clarifyBtn.textContent = 'Analyzing...'; clarifyBtn.style.opacity = '0.6'; clarifyBtn.style.pointerEvents = 'none'; }
+
+  // Extract outdoor hours if specified as numbers
+  let outdoorHours = 2.0;
+  const hoursMatch = qOutdoor ? (qOutdoor.match(/(\d+(?:\.\d+)?)\s*(?:h|hr|hour)/i) || qOutdoor.match(/(\d+(?:\.\d+)?)/)) : null;
+  if (hoursMatch) {
+    const parsed = parseFloat(hoursMatch[1]);
+    if (!isNaN(parsed) && parsed > 0 && parsed <= 24) outdoorHours = parsed;
+  }
+
+  const payload = {
+    profile_text: profileText,
+    profile_name: "My Profile",
+    occupation: qWork || "General",
+    outdoor_hours: outdoorHours,
+    commute_mode: qOutdoor || "Commuter",
+    health_conditions: qHealth ? [qHealth] : [],
+    city: (state.homeData && state.homeData.location_name) || state.location.name || "My City",
+    current_aqi: (state.homeData && state.homeData.air_quality && state.homeData.air_quality.aqi) || 186,
+    current_pm25: (state.homeData && state.homeData.air_quality && state.homeData.air_quality.pm25) || 118.4,
+    temperature_c: (state.homeData && state.homeData.weather && state.homeData.weather.temp_c) || 28.0,
+    humidity_percent: (state.homeData && state.homeData.weather && state.homeData.weather.humidity) || 55.0
+  };
+
+  try {
+    const res = await fetch('/api/v1/evaluate-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const result = await res.json();
+
+    const tier = result.vulnerability_tier || result.vulnerability_level || 'Personalized';
+    const evalText = result.evaluation_text || result.clinical_evaluation || '';
+    const tips = result.actionable_tips || result.personalized_tips || [];
+    const gear = result.gear_recommendation || result.protective_gear_recommendation || '';
+    const commute = result.commute_advice || result.commute_advisory || '';
+
+    let html = '';
+    if (tier) {
+      const colors = { 'Critical': '#FF5B57', 'High': '#FF9F2F', 'Elevated': '#F2CF45', 'Standard': '#28D777' };
+      html += `<div style="font-size: 15px; font-weight: 700; color: ${colors[tier] || '#72A7FF'}; margin-bottom: 10px;">Risk Level: ${tier}</div>`;
+    }
+    if (evalText) html += `<p style="margin-bottom: 12px; font-size: 14px; line-height: 1.5;">${evalText}</p>`;
+    if (tips.length) {
+      html += '<div style="font-size: 12px; font-weight: 700; color: var(--focus); margin: 8px 0 6px;">Your Personalized Tips:</div><ul style="padding-left: 18px; margin: 0;">';
+      tips.forEach(tip => { html += `<li style="margin-bottom: 6px; font-size: 13px; line-height: 1.4;">${tip}</li>`; });
+      html += '</ul>';
+    }
+    if (gear) html += `<div style="margin-top: 10px; font-size: 13px;"><strong style="color: var(--good);">Gear:</strong> ${gear}</div>`;
+    if (commute) html += `<div style="margin-top: 4px; font-size: 13px;"><strong style="color: var(--focus);">Commute:</strong> ${commute}</div>`;
+
+    if (profileResultText) profileResultText.innerHTML = html;
+
+    localStorage.setItem('airwise_profile', JSON.stringify({
+      work: qWork,
+      outdoor: qOutdoor,
+      health: qHealth,
+      extra: qExtra,
+      profile_text: profileText,
+      resultHtml: html,
+      vulnerability_tier: tier,
+      clinical_evaluation: evalText,
+      hindi_evaluation: result.hindi_evaluation || '',
+      personalized_tips: tips,
+      protective_gear_recommendation: gear,
+      commute_advisory: commute,
+      safe_outdoor_minutes_today: result.safe_outdoor_minutes_today || null,
+      inhaled_rate_ug_min: result.inhaled_rate_ug_min || null,
+      custom_deposition_fraction: result.custom_deposition_fraction || null,
+      last_city: (state.homeData && state.homeData.location_name) || state.location.name || '',
+      timestamp: Date.now()
+    }));
+
+    if (tier === 'Critical' || tier === 'High') state.set({ profile: 'sensitive_respiratory' });
+    else if (tier === 'Elevated') state.set({ profile: 'child_elderly' });
+
+    // Live update Personal Exposure Estimate card on main screen
+    updatePersonalExposureCard(state.homeData);
+    loadData();
+
+  } catch (err) {
+    console.error('Profile evaluation failed:', err);
+    if (profileResultText) profileResultText.innerHTML = `<span style="color: var(--unhealthy);">Evaluation failed: ${err.message}. Your answers have been saved.</span>`;
+    localStorage.setItem('airwise_profile', JSON.stringify({ work: qWork, outdoor: qOutdoor, health: qHealth, extra: qExtra, resultHtml: '', timestamp: Date.now() }));
+  } finally {
+    if (btn) { btn.textContent = "Let's Go ✨"; btn.style.opacity = '1'; btn.style.pointerEvents = 'auto'; }
+    if (clarifyBtn) { clarifyBtn.textContent = "Save & Evaluate ✨"; clarifyBtn.style.opacity = '1'; clarifyBtn.style.pointerEvents = 'auto'; }
+  }
+
+  onboardNext(5);
+}
+
+function formatConciseDoctorNote(text, maxLen = 175) {
+  if (!text) return '';
+  const trimmed = String(text).trim();
+  if (trimmed.length <= maxLen) return trimmed;
+
+  // Prefer first complete sentence ending in . ! ? or ।
+  const sentenceMatch = trimmed.match(/^([^.!?।]+[.!?।]+)/);
+  if (sentenceMatch && sentenceMatch[1].length <= maxLen && sentenceMatch[1].length > 40) {
+    return sentenceMatch[1].trim();
+  }
+
+  // Fallback to cutting at word boundary
+  const sub = trimmed.slice(0, maxLen);
+  const lastSpace = sub.lastIndexOf(' ');
+  return (lastSpace > 50 ? sub.slice(0, lastSpace) : sub).trim() + '…';
+}
+
+function parseDoctorStep(tip, idx) {
+  if (!tip) return { title: '', desc: '', tip: '' };
+  let title = '';
+  let desc = '';
+  const rawTip = String(tip).trim();
+
+  // Pattern A: "Step X: Title — Description" or "Step X: Title: Description" or "Step X - Title — Description"
+  const stepMatch = rawTip.match(/^Step\s*(\d+)\s*[:\-\u2013\u2014]\s*(.+)$/i);
+  if (stepMatch) {
+    const remainder = stepMatch[2].trim();
+    // Delimiters: em-dash (—), en-dash (–), colon (:), or hyphen (-)
+    const delimMatch = remainder.match(/^([^\:\-\u2013\u2014]+?)\s*[:\-\u2013\u2014]\s+(.+)$/);
+    if (delimMatch && delimMatch[1].trim().length < 60) {
+      title = delimMatch[1].trim();
+      desc = delimMatch[2].trim();
+    } else {
+      desc = remainder;
+    }
+  } else {
+    // Pattern B: "Title — Description" or "Title: Description" without Step prefix
+    const delimMatch = rawTip.match(/^([A-Z][^\:\-\u2013\u2014]{2,45}?)\s*[:\-\u2013\u2014]\s+(.+)$/);
+    if (delimMatch) {
+      title = delimMatch[1].trim();
+      desc = delimMatch[2].trim();
+    } else {
+      desc = rawTip;
+    }
+  }
+
+  return { title, desc, tip: rawTip };
+}
+
+function renderDoctorStepHtml(tip, idx) {
+  const { title, desc, tip: rawTip } = parseDoctorStep(tip, idx);
+  return `
+    <li class="doctor-step-item">
+      <div class="doctor-step-badge">Step ${idx + 1}</div>
+      <div class="doctor-step-content">
+        ${title ? `<div class="doctor-step-title">${title}</div>` : ''}
+        <div class="doctor-step-desc">${desc || rawTip || tip}</div>
+      </div>
+    </li>
+  `;
+}
+
+async function refreshProfileForLocation(d) {
+  if (!d || !d.location_name) return;
+  // In-flight guard to prevent duplicate re-evaluations
+  if (state._evaluatingCity === d.location_name) return;
+  state._evaluatingCity = d.location_name;
+
+  try {
+    const saved = localStorage.getItem('airwise_profile');
+    if (!saved) return;
+    const p = JSON.parse(saved);
+
+    const profileText = p.profile_text || [
+      p.work ? `Daily work/routine: ${p.work}` : '',
+      p.outdoor ? `Outdoor exposure & commute: ${p.outdoor}` : '',
+      p.health ? `Health conditions/allergies: ${p.health}` : '',
+      p.extra ? `Additional info: ${p.extra}` : ''
+    ].filter(Boolean).join('. ') || 'My routine';
+
+    const payload = {
+      profile_text: profileText,
+      profile_name: "My Profile",
+      city: d.location_name,
+      current_aqi: d.air_quality ? d.air_quality.aqi : 186,
+      current_pm25: d.air_quality ? d.air_quality.pm25 : 118.4,
+      temperature_c: d.weather ? d.weather.temp_c : 30.0,
+      humidity_percent: d.weather ? d.weather.humidity : 55.0
+    };
+
+    const res = await fetch('/api/v1/evaluate-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error(`Profile evaluation returned status ${res.status}`);
+    const result = await res.json();
+
+    const currentSaved = localStorage.getItem('airwise_profile');
+    const updatedP = currentSaved ? JSON.parse(currentSaved) : p;
+
+    updatedP.personalized_tips = result.actionable_tips || result.personalized_tips || updatedP.personalized_tips || [];
+    updatedP.clinical_evaluation = result.clinical_evaluation || result.evaluation_text || updatedP.clinical_evaluation || '';
+    updatedP.hindi_evaluation = result.hindi_evaluation || updatedP.hindi_evaluation || '';
+    if (result.protective_gear_recommendation || result.gear_recommendation) {
+      updatedP.protective_gear_recommendation = result.protective_gear_recommendation || result.gear_recommendation;
+    }
+    if (result.commute_advisory || result.commute_advice) {
+      updatedP.commute_advisory = result.commute_advisory || result.commute_advice;
+    }
+    if (result.vulnerability_level || result.vulnerability_tier) {
+      updatedP.vulnerability_tier = result.vulnerability_level || result.vulnerability_tier;
+    }
+    updatedP.last_city = d.location_name;
+    updatedP.timestamp = Date.now();
+
+    localStorage.setItem('airwise_profile', JSON.stringify(updatedP));
+    updatePersonalExposureCard(d);
+  } catch (err) {
+    console.warn('Background profile refresh for location failed:', err);
+  } finally {
+    state._evaluatingCity = null;
+  }
+}
+
+function updatePersonalExposureCard(d) {
+  const saved = localStorage.getItem('airwise_profile');
+  const tipsForYouSection = document.getElementById('tipsForYouSection');
+  const tipsEmptyState = document.getElementById('tipsEmptyState');
+  const tipsCardSurface = document.getElementById('tipsCardSurface') || document.getElementById('personalizedTipsBox');
+  const personalizedTipsBox = document.getElementById('personalizedTipsBox') || tipsCardSurface;
+  const profileBadgePill = document.getElementById('profileBadgePill');
+  const doctorBadgePill = document.getElementById('doctorBadgePill');
+  const doctorNoteText = document.getElementById('doctorNoteText');
+  const tipsRiskBadge = document.getElementById('tipsRiskBadge');
+  const tipsBulletList = document.getElementById('tipsBulletList');
+  const tipGearItem = document.getElementById('tipGearItem');
+  const tipGearVal = document.getElementById('tipGearVal');
+  const tipCommuteItem = document.getElementById('tipCommuteItem');
+  const tipCommuteVal = document.getElementById('tipCommuteVal');
+  const doseLabel = document.getElementById('doseLabel');
+  const guidanceActionEl = document.getElementById('guidanceAction');
+  const guidanceWhyEl = document.getElementById('guidanceWhy');
+  const cigValEl = document.getElementById('cigVal');
+  const cigN95PillEl = document.getElementById('cigN95Pill');
+  const lang = state.lang || 'en';
+
+  // Render cigarette equivalents
+  if (d && d.cigarette_equivalents) {
+    const ce = d.cigarette_equivalents;
+    if (cigValEl) {
+      cigValEl.textContent = ce.cigarette_count != null ? ce.cigarette_count : '0.0';
+    }
+    if (cigN95PillEl) {
+      cigN95PillEl.textContent = `With N95 Mask: ~${ce.with_n95 != null ? ce.with_n95 : '0.0'} cigs (-90%)`;
+    }
+    if (guidanceActionEl) {
+      if (lang === 'hi' && ce.headline_hi) {
+        guidanceActionEl.textContent = ce.headline_hi;
+      } else if (ce.headline_en) {
+        guidanceActionEl.textContent = ce.headline_en;
+      } else {
+        guidanceActionEl.textContent = `Cardiovascular & mortality risk equivalent to smoking ~${ce.cigarette_count} cigarettes.`;
+      }
+    }
+  }
+
+  // Doctor Badge Pill
+  if (doctorBadgePill) {
+    doctorBadgePill.style.display = 'inline-flex';
+    doctorBadgePill.textContent = "🩺 Personal Doctor's Advice";
+  }
+
+  if (saved) {
+    try {
+      const p = JSON.parse(saved);
+      if (p.personalized_tips && p.personalized_tips.length > 0) {
+        // Show personalized tips section & card surface; hide empty prompt
+        if (tipsForYouSection) tipsForYouSection.style.display = 'block';
+        if (tipsCardSurface) tipsCardSurface.style.display = 'block';
+        if (personalizedTipsBox) personalizedTipsBox.style.display = 'block';
+        if (tipsEmptyState) tipsEmptyState.style.display = 'none';
+
+        // 1. Profile badge pill
+        if (profileBadgePill) {
+          profileBadgePill.style.display = 'inline-flex';
+          profileBadgePill.textContent = `✨ ${p.vulnerability_tier || 'Active'} Profile`;
+        }
+
+        // 2. Doctor's Personalized Note (Concise & Location-Aware)
+        if (doctorNoteText) {
+          if (d && d.location_name && d.air_quality && (p.last_city !== d.location_name || state._evaluatingCity === d.location_name)) {
+            doctorNoteText.textContent = `As your doctor, looking at your routine in ${d.location_name} (${d.air_quality.category} • AQI ${d.air_quality.aqi})...`;
+          } else if (lang === 'hi' && p.hindi_evaluation) {
+            doctorNoteText.textContent = formatConciseDoctorNote(p.hindi_evaluation);
+          } else if (p.clinical_evaluation) {
+            doctorNoteText.textContent = formatConciseDoctorNote(p.clinical_evaluation);
+          } else {
+            doctorNoteText.textContent = `Today's particulate levels place extra load on your respiratory system. Here is your targeted prevention plan based on your ${p.work || 'daily'} routine.`;
+          }
+        }
+
+        // 3. Render 4 concise steps styled with Apple dark glass aesthetic
+        if (tipsBulletList) {
+          tipsBulletList.innerHTML = p.personalized_tips
+            .slice(0, 4)
+            .map((tip, idx) => renderDoctorStepHtml(tip, idx))
+            .join('');
+        }
+
+        // 4. Render gear & commute recommendations in the top section
+        if (tipGearItem) {
+          if (p.protective_gear_recommendation) {
+            tipGearItem.style.display = 'flex';
+            if (tipGearVal) tipGearVal.textContent = p.protective_gear_recommendation;
+          } else {
+            tipGearItem.style.display = 'none';
+          }
+        }
+        if (tipCommuteItem) {
+          if (p.commute_advisory) {
+            tipCommuteItem.style.display = 'flex';
+            if (tipCommuteVal) tipCommuteVal.textContent = p.commute_advisory;
+          } else {
+            tipCommuteItem.style.display = 'none';
+          }
+        }
+
+        // 5. Update guidance why / clinical insight
+        if (p.clinical_evaluation && guidanceWhyEl) {
+          if (lang === 'hi' && p.hindi_evaluation) {
+            guidanceWhyEl.textContent = p.hindi_evaluation;
+          } else {
+            guidanceWhyEl.textContent = p.clinical_evaluation;
+          }
+        }
+
+        // Backward compatibility for legacy in-card box
+        if (tipsRiskBadge) {
+          tipsRiskBadge.textContent = p.vulnerability_tier || 'Personalized';
+          const colors = { 'Critical': '#FF5B57', 'High': '#FF9F2F', 'Elevated': '#F2CF45', 'Standard': '#28D777' };
+          tipsRiskBadge.style.color = colors[p.vulnerability_tier] || '#FF9F2F';
+        }
+
+        if (doseLabel && p.work) {
+          doseLabel.textContent = `Estimated PM2.5 equivalent for your routine (${p.work}):`;
+        }
+        return;
+      }
+    } catch (e) {
+      console.warn('Error parsing saved profile:', e);
+    }
+  }
+
+  // Fallback / default state when no personalized profile with tips:
+  // Keep the doctor's advice card surface visible with clinical guidance
+  if (tipsForYouSection) tipsForYouSection.style.display = 'block';
+  if (tipsCardSurface) tipsCardSurface.style.display = 'block';
+  if (personalizedTipsBox) personalizedTipsBox.style.display = 'block';
+  if (tipsEmptyState) tipsEmptyState.style.display = 'block';
+  if (profileBadgePill) profileBadgePill.style.display = 'none';
+
+  if (doctorNoteText) {
+    if (d && d.personal_guidance && d.personal_guidance.guidance_text) {
+      doctorNoteText.textContent = formatConciseDoctorNote((d.personal_guidance.guidance_text[lang] || d.personal_guidance.guidance_text['en']) + " Protect your airways from alveolar particulate deposition today.");
+    } else {
+      doctorNoteText.textContent = "Air quality in your area requires conscious respiratory protection today. Minimize prolonged outdoor exertion.";
+    }
+  }
+
+  if (tipsBulletList) {
+    tipsBulletList.innerHTML = `
+      <li class="doctor-step-item">
+        <div class="doctor-step-badge">Step 1</div>
+        <div class="doctor-step-content">
+          <div class="doctor-step-title">Pace Transit</div>
+          <div class="doctor-step-desc">Minimize exposure during high particulate peaks.</div>
+        </div>
+      </li>
+      <li class="doctor-step-item">
+        <div class="doctor-step-badge">Step 2</div>
+        <div class="doctor-step-content">
+          <div class="doctor-step-title">Seal Indoors</div>
+          <div class="doctor-step-desc">Keep indoor spaces sealed and run HEPA air purification if available.</div>
+        </div>
+      </li>
+      <li class="doctor-step-item">
+        <div class="doctor-step-badge">Step 3</div>
+        <div class="doctor-step-content">
+          <div class="doctor-step-title">Hydration &amp; Monitoring</div>
+          <div class="doctor-step-desc">Stay hydrated and monitor respiratory symptoms when exercising outdoors.</div>
+        </div>
+      </li>
+      <li class="doctor-step-item">
+        <div class="doctor-step-badge">Step 4</div>
+        <div class="doctor-step-content">
+          <div class="doctor-step-title">Barrier Protection</div>
+          <div class="doctor-step-desc">Wear a certified N95 respirator if spending extended time in traffic.</div>
+        </div>
+      </li>
+    `;
+  }
+
+  if (tipGearItem) tipGearItem.style.display = 'none';
+  if (tipCommuteItem) tipCommuteItem.style.display = 'none';
+  if (doseLabel) doseLabel.textContent = 'PM2.5 equivalent mortality risk (Berkeley Earth Model)';
+}
+
+function loadSavedProfile() {
+  const saved = localStorage.getItem('airwise_profile');
+  if (saved) {
+    try {
+      const profile = JSON.parse(saved);
+      const qWork = document.getElementById('qWorkRoutine');
+      const qOutdoor = document.getElementById('qOutdoorCommute');
+      const qHealth = document.getElementById('qHealthIssues');
+      const qExtra = document.getElementById('qAnythingElse');
+      if (qWork && profile.work) qWork.value = profile.work;
+      if (qOutdoor && profile.outdoor) qOutdoor.value = profile.outdoor;
+      if (qHealth && profile.health) qHealth.value = profile.health;
+      if (qExtra && profile.extra) qExtra.value = profile.extra;
+
+      // Also apply saved profile to Personal Exposure Estimate card on initial load
+      updatePersonalExposureCard(state.homeData);
+    } catch(e) {
+      console.warn('Failed to load saved profile:', e);
+    }
+  } else {
+    // Trigger initial empty state for tips
+    updatePersonalExposureCard(state.homeData);
+
+    // Prompt new visitors to personalize their health profile on first visit
+    setTimeout(() => {
+      openProfileModal();
+    }, 450);
+  }
+}
+
+// Expose to global scope for onclick handlers (ES module scoping)
+window.onboardNext = onboardNext;
+window.onboardSubmit = onboardSubmit;
+window.submitClarifiedAnswers = submitClarifiedAnswers;
+window.skipClarification = skipClarification;
+window.openProfileModal = openProfileModal;
+window.closeProfileModal = closeProfileModal;
+window.refreshProfileForLocation = refreshProfileForLocation;
+window.updatePersonalExposureCard = updatePersonalExposureCard;
