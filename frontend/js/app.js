@@ -204,16 +204,11 @@ function renderApp(dataOverride, isUserAction = false) {
   updateAirQualityMap(d);
 }
 
-// Leaflet Air Quality Radar Map & Continuous Heatmap
+// Leaflet Air Quality Radar Map (MSN Weather Style)
 let leafletMap = null;
 let stationMarkersGroup = null;
 let userMarker = null;
 let atmosphericHeatCircle = null;
-let heatLayer = null;
-let waqiTileLayer = null;
-let isHeatmapActive = true;
-let isStationsActive = true;
-let isWaqiRadarActive = false;
 
 function getAqiHexColor(aqi) {
   if (aqi <= 50) return '#2ea043';
@@ -275,52 +270,6 @@ function initAirQualityMap() {
     if (leafletMap) leafletMap.zoomOut();
   });
 
-  // Map Layer Controls (Heatmap, Stations, WAQI Radar)
-  const toggleHeatmapBtn = document.getElementById('toggleHeatmapBtn');
-  if (toggleHeatmapBtn) {
-    toggleHeatmapBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      isHeatmapActive = !isHeatmapActive;
-      toggleHeatmapBtn.classList.toggle('active', isHeatmapActive);
-      if (heatLayer && leafletMap) {
-        if (isHeatmapActive) leafletMap.addLayer(heatLayer);
-        else leafletMap.removeLayer(heatLayer);
-      }
-    });
-  }
-
-  const toggleStationsBtn = document.getElementById('toggleStationsBtn');
-  if (toggleStationsBtn) {
-    toggleStationsBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      isStationsActive = !isStationsActive;
-      toggleStationsBtn.classList.toggle('active', isStationsActive);
-      if (stationMarkersGroup && leafletMap) {
-        if (isStationsActive) leafletMap.addLayer(stationMarkersGroup);
-        else leafletMap.removeLayer(stationMarkersGroup);
-      }
-    });
-  }
-
-  const toggleWaqiRadarBtn = document.getElementById('toggleWaqiRadarBtn');
-  if (toggleWaqiRadarBtn) {
-    toggleWaqiRadarBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      isWaqiRadarActive = !isWaqiRadarActive;
-      toggleWaqiRadarBtn.classList.toggle('active', isWaqiRadarActive);
-      if (!waqiTileLayer) {
-        waqiTileLayer = L.tileLayer('https://tiles.aqicn.org/tiles/usepa-aqi/{z}/{x}/{y}.png', {
-          maxZoom: 16,
-          opacity: 0.72
-        });
-      }
-      if (leafletMap) {
-        if (isWaqiRadarActive) leafletMap.addLayer(waqiTileLayer);
-        else leafletMap.removeLayer(waqiTileLayer);
-      }
-    });
-  }
-
   setTimeout(() => {
     if (leafletMap) leafletMap.invalidateSize();
   }, 100);
@@ -367,78 +316,17 @@ function updateAirQualityMap(d) {
     userMarker.bindTooltip("You are here", { direction: 'top', offset: [0, -8] });
   }
 
-  // Generate 2D Continuous AQI Heatmap Mesh (Leaflet.heat)
-  const heatPoints = [];
-  const baseIntensity = Math.min(1.0, Math.max(0.20, aqi / 240.0));
-  heatPoints.push([lat, lon, baseIntensity]);
-
-  // Atmospheric multi-ring dispersion model
-  const dispersionRings = [0.014, 0.032, 0.058, 0.092, 0.135];
-  dispersionRings.forEach((rDeg, idx) => {
-    const ptCount = 8 + idx * 3;
-    const falloff = Math.max(0.12, baseIntensity * Math.pow(0.72, idx + 1));
-    for (let i = 0; i < ptCount; i++) {
-      const angle = (i * 2 * Math.PI) / ptCount;
-      const pLat = lat + Math.sin(angle) * rDeg;
-      const pLon = lon + Math.cos(angle) * rDeg;
-      heatPoints.push([pLat, pLon, falloff]);
-    }
-  });
-
-  // Nearby monitoring stations
-  if (stationMarkersGroup) {
-    stationMarkersGroup.clearLayers();
-  }
-
-  const stations = d.nearby_stations || [];
-  stations.forEach((st) => {
-    const stIntensity = Math.min(1.0, Math.max(0.20, st.aqi / 240.0));
-    heatPoints.push([st.lat, st.lon, stIntensity]);
-    // Micro station dispersion nodes
-    const microRad = 0.016;
-    for (let k = 0; k < 6; k++) {
-      const a = (k * 2 * Math.PI) / 6;
-      heatPoints.push([st.lat + Math.sin(a) * microRad, st.lon + Math.cos(a) * microRad, stIntensity * 0.85]);
-    }
-  });
-
-  // Build / update L.heatLayer
-  if (heatLayer && leafletMap) {
-    leafletMap.removeLayer(heatLayer);
-    heatLayer = null;
-  }
-
-  if (typeof L !== 'undefined' && typeof L.heatLayer === 'function') {
-    heatLayer = L.heatLayer(heatPoints, {
-      radius: 42,
-      blur: 32,
-      maxZoom: 15,
-      max: 1.0,
-      minOpacity: 0.38,
-      gradient: {
-        0.12: '#2ea043',
-        0.32: '#d29922',
-        0.52: '#db6d28',
-        0.72: '#f85149',
-        0.88: '#bc8cff',
-        1.00: '#8c1d40'
-      }
-    });
-    if (isHeatmapActive) {
-      heatLayer.addTo(leafletMap);
-    }
-  }
-
-  // Plume boundary ring
+  // Atmospheric Dispersion Plume Overlay (MSN Weather Style)
   if (atmosphericHeatCircle) {
     leafletMap.removeLayer(atmosphericHeatCircle);
   }
+
   const plumeColor = getAqiHexColor(aqi);
   atmosphericHeatCircle = L.circle([lat, lon], {
-    radius: 16000,
+    radius: 14000,
     color: plumeColor,
     fillColor: plumeColor,
-    fillOpacity: 0.08,
+    fillOpacity: 0.16,
     weight: 1.5,
     dashArray: '4, 6'
   }).addTo(leafletMap);
