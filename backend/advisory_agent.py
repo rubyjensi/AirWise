@@ -333,6 +333,37 @@ Output strict JSON with these keys:
         return det_eval
 
     @staticmethod
+    def _clean_user_role(role: str) -> str:
+        if not role or not isinstance(role, str):
+            return "Active Individual"
+        r = role.strip()
+        patterns = [
+            r"^i\s+am\s+an?\s+",
+            r"^i'm\s+an?\s+",
+            r"^i\s+am\s+",
+            r"^i'm\s+",
+            r"^working\s+as\s+an?\s+",
+            r"^work\s+as\s+an?\s+",
+            r"^job\s+is\s+an?\s+",
+            r"^my\s+role\s+is\s+an?\s+",
+            r"^my\s+job\s+is\s+an?\s+",
+            r"^daily\s+work/routine:\s*",
+        ]
+        for pat in patterns:
+            r = re.sub(pat, "", r, flags=re.IGNORECASE).strip()
+        low = r.lower()
+        if "gymrat" in low or "gym rat" in low or "gym-rat" in low or "bodybuilder" in low or "weightlifter" in low or "lifter" in low:
+            return "Dedicated Gym-Goer / Lifter"
+        if "coder" in low or "programmer" in low or "developer" in low:
+            return "Software Engineer"
+        if "biker" in low or (low == "rider"):
+            return "Motorcycle Commuter"
+        r = r.strip(".,;:!- ")
+        if not r or len(r) < 3:
+            return "Active Individual"
+        return r.title()
+
+    @staticmethod
     def _clean_clinical_eval(
         eval_text: str,
         fallback_eval: str,
@@ -340,11 +371,16 @@ Output strict JSON with these keys:
         city_name: str,
         aqi_val: int,
     ) -> str:
-        if not eval_text or not isinstance(eval_text, str):
+        if not eval_text or not isinstance(eval_text, str) or len(eval_text.strip()) < 10:
             return fallback_eval
 
         text = eval_text.strip()
-        expected_prefix = f"As your doctor, looking at your routine as a {work_name} in {city_name} (AQI {aqi_val})"
+        clean_role = AdvisoryAgent._clean_user_role(work_name)
+        expected_prefix = f"As your doctor, looking at your routine as a {clean_role} in {city_name} (AQI {aqi_val})"
+
+        # Clean any clumsy "as a i am a" patterns
+        text = re.sub(r"as\s+a\s+i\s+am\s+a\b", f"as a {clean_role}", text, flags=re.IGNORECASE)
+        text = re.sub(r"as\s+a\s+i'm\s+a\b", f"as a {clean_role}", text, flags=re.IGNORECASE)
 
         # Ensure required opening phrase
         if not text.lower().startswith("as your doctor, looking at your routine as a"):
@@ -358,10 +394,10 @@ Output strict JSON with these keys:
         if len(sentences) > 2:
             text = " ".join(sentences[:2])
 
-        # Enforce under 35 words
+        # Gracefully trim if extremely long, but NEVER discard AI output
         words = text.split()
-        if len(words) >= 35:
-            return fallback_eval
+        if len(words) > 42:
+            text = " ".join(words[:42]).rstrip(",;:-") + "."
 
         return text
 
@@ -370,9 +406,9 @@ Output strict JSON with these keys:
         text: str,
         fallback_text: str,
         prefix: str = "",
-        max_words: int = 20,
+        max_words: int = 22,
     ) -> str:
-        if not text or not isinstance(text, str):
+        if not text or not isinstance(text, str) or len(text.strip()) < 5:
             return fallback_text
         text = text.strip()
         if prefix and not text.lower().startswith(prefix.lower()):
@@ -380,8 +416,10 @@ Output strict JSON with these keys:
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
         if sentences:
             text = sentences[0]
-        if len(text.split()) > max_words:
-            return fallback_text
+        # Gracefully trim rather than discarding to fallback
+        words = text.split()
+        if len(words) > max_words + 10:
+            text = " ".join(words[:max_words + 10]).rstrip(",;:-") + "."
         return text
 
     @staticmethod
@@ -536,19 +574,24 @@ Output strict JSON with these keys:
 
         is_delivery = any(re.search(rf"\b{re.escape(w)}\b", text) or re.search(rf"\b{re.escape(w)}\b", occ) for w in ["delivery", "courier", "rider", "swiggy", "zomato"])
         is_runner = any(re.search(rf"\b{re.escape(w)}\b", text) or re.search(rf"\b{re.escape(w)}\b", occ) for w in ["runner", "athlete", "running", "jog", "cardio", "marathon"])
+        is_gym = any(re.search(rf"\b{re.escape(w)}\b", text) or re.search(rf"\b{re.escape(w)}\b", occ) for w in ["gym", "lift", "lifter", "workout", "fitness", "bodybuilding", "weights", "strength", "crossfit", "gymrat", "gym rat"])
         is_senior = any(re.search(rf"\b{re.escape(w)}\b", text) or re.search(rf"\b{re.escape(w)}\b", occ) for w in ["senior", "elderly", "retired", "old age", "70 years", "65 years", "grandparent"])
         is_2wheeler = any(re.search(rf"\b{re.escape(w)}\b", commute) or re.search(rf"\b{re.escape(w)}\b", text) for w in ["motorcycle", "bike", "scooter", "motorbike", "2-wheeler", "two-wheeler"])
 
-        work_name = req.occupation.strip() if req.occupation and req.occupation not in ("General", "Active Professional") else None
-        if not work_name and req.profile_text:
-            m_role = re.search(r"(?:work as an?|working as an?|i am an?|occupation:\s*|role:\s*|job:\s*|daily work/routine:\s*)([a-zA-Z\s\-]{3,30}?)(?:\s+(?:in|at|for|commute|outdoors|with)|[,.\n]|$)", req.profile_text, re.IGNORECASE)
-            if m_role:
-                work_name = m_role.group(1).strip().title()
-        if not work_name:
+        raw_occ = req.occupation.strip() if req.occupation and req.occupation not in ("General", "Active Professional") else None
+        work_name = AdvisoryAgent._clean_user_role(raw_occ) if raw_occ else None
+        if not work_name or work_name == "Active Individual":
+            if req.profile_text:
+                m_role = re.search(r"(?:work as an?|working as an?|i am an?|occupation:\s*|role:\s*|job:\s*|daily work/routine:\s*)([a-zA-Z\s\-]{3,30}?)(?:\s+(?:in|at|for|commute|outdoors|with)|[,.\n]|$)", req.profile_text, re.IGNORECASE)
+                if m_role:
+                    work_name = AdvisoryAgent._clean_user_role(m_role.group(1))
+        if not work_name or work_name == "Active Individual":
             work_name = (
-                "Delivery Rider" if is_delivery else (
-                    "Runner / Athlete" if is_runner else (
-                        "Retired Senior" if is_senior else "Active Individual"
+                "Dedicated Gym-Goer / Lifter" if is_gym else (
+                    "Delivery Rider" if is_delivery else (
+                        "Runner / Athlete" if is_runner else (
+                            "Retired Senior" if is_senior else "Active Individual"
+                        )
                     )
                 )
             )
@@ -559,7 +602,7 @@ Output strict JSON with these keys:
         if req.profile_text:
             routine_parts.append(req.profile_text.strip())
         if req.occupation and req.occupation != "General" and req.occupation.lower() not in (req.profile_text or "").lower():
-            routine_parts.append(f"Work/Role: {req.occupation}")
+            routine_parts.append(f"Work/Role: {work_name}")
         if req.outdoor_hours and str(req.outdoor_hours) not in (req.profile_text or ""):
             routine_parts.append(f"Outdoor exposure: ~{req.outdoor_hours:g} hours/day")
         if req.commute_mode and req.commute_mode != "Commuter" and req.commute_mode.lower() not in (req.profile_text or "").lower():
@@ -571,33 +614,53 @@ Output strict JSON with these keys:
             req.profile_text or f"Work: {work_name}, Commute: {req.commute_mode}, Outdoor: {req.outdoor_hours} hrs, Conditions: {', '.join(req.health_conditions)}"
         )
 
-        system_prompt = f"""You are the patient's dedicated personal physician and pulmonary specialist.
-Provide concise, warm, caring medical advice formatted as CONCISE ACTIONABLE STEPS according to the person.
-Never write long academic lectures, textbook pathophysiology essays, or wordy paragraphs. Be direct, compassionate, and actionable.
+        system_prompt = f"""You are the patient's dedicated personal physician, sports pulmonologist, and environmental clinical specialist.
+Provide concise, warm, caring medical advice formatted as 4 CONCISE, HIGHLY SPECIALIZED ACTIONABLE STEPS tailored strictly to the person's specific routine, occupation, and health context.
+
+CRITICAL ANTI-GENERIC DIRECTIVE:
+NEVER give generic, repetitive public health clichés like:
+- "wear an N95 mask" or "wear a mask during commute" (unless specifying exact sport or industrial valved models with clinical rationale)
+- "run a HEPA purifier in bedroom" or "keep windows closed"
+- "perform a saline nasal rinse twice daily"
+- "drink plenty of water / stay hydrated"
+The patient is consulting YOU for DEEP, CLINICAL SPECIALIZATION tailored to their exact activities:
+- If the patient is into gym, lifting, bodybuilding, running, or fitness:
+  * Address heavy mouth-breathing minute ventilation (jumping from 7 L/min to 60+ L/min) during heavy compound lifts, driving soot into the alveoli.
+  * Counter pollution's blunting of endothelial nitric oxide (NO) synthase and muscle pumps (e.g. dietary nitrates/citrulline pre-workout).
+  * Advise extending inter-set rest periods (3+ min) so exercise hyperpnea subsides before the next set.
+  * Gym micro-environment positioning (away from open street shutters and high-traffic doors; near filtered HVAC).
+  * Post-workout cellular antioxidant replenishment: oral N-acetylcysteine (NAC 600mg) and Vitamin C to restore lung glutathione reserves.
+- If the patient is a delivery rider, cyclist, or two-wheeler commuter:
+  * Address helmet airflow, road-level diesel exhaust plume buffering at red lights, sweat/moisture management under respirators, and corneal particulate wash.
+- If the patient is an office worker, student, or programmer:
+  * Address indoor CO2 vs PM2.5 infiltration trade-offs, avoiding midday walks during photochemical smog peaks, desktop air delivery, screen eye strain exacerbation.
+- If the patient has asthma or respiratory sensitivities:
+  * Address pre-exposure preventative bronchodilator timing, cold-air smog bronchospasm triggers, airway warming, and mucus thinning.
+- If the patient has eye/throat irritation or allergies:
+  * Address lipid-based artificial tears, soothing pharyngeal rinses, and immediate post-transit clothing/decontamination routines.
 
 STRICT CLINICAL RULES FOR JSON OUTPUT:
 1. "clinical_evaluation":
-   - MUST BE SHORT: maximum 2 sentences, strictly UNDER 35 WORDS total!
+   - MUST BE SHORT: maximum 2 sentences, strictly under 40 words total!
    - MUST open with: "As your doctor, looking at your routine as a {work_name} in {city_name} (AQI {aqi_val})..."
-   - State the primary clinical goal concisely without long academic pathophysiology lectures.
+   - State the primary physiological goal concisely without generic clichés.
 2. "hindi_evaluation":
-   - MUST BE SHORT: 1-2 caring family-doctor sentences in fluent Hindi (Devanagari script).
+   - MUST BE SHORT: 1-2 caring, respectful sentences in fluent Hindi (Devanagari script).
 3. "personalized_tips":
-   - EXACTLY 4 concise, numbered actionable steps tailored to the person's specific routine, commute, and health.
-   - Each tip MUST be formatted with a clear step title:
-     "Step 1: [Title] — [Concise 1-sentence action, 10-18 words max]"
-     "Step 2: [Title] — [Concise 1-sentence action, 10-18 words max]"
-     "Step 3: [Title] — [Concise 1-sentence action, 10-18 words max]"
-     "Step 4: [Title] — [Concise 1-sentence action, 10-18 words max]"
-   - Strictly enforce that every step directly addresses the user's specific answers (work, outdoor hours, transit, and symptoms like stinging eyes, wheezing, cough, fatigue). Generic advice is strictly forbidden.
+   - EXACTLY 4 concise, numbered actionable steps:
+     "Step 1: [Specialized Title] — [1-sentence highly specific action, 10-22 words]"
+     "Step 2: [Specialized Title] — [1-sentence highly specific action, 10-22 words]"
+     "Step 3: [Specialized Title] — [1-sentence highly specific action, 10-22 words]"
+     "Step 4: [Specialized Title] — [1-sentence highly specific action, 10-22 words]"
+   - Every single step MUST be hyper-tailored to their specific activity, commute, and symptoms! No generic boilerplates.
 4. "protective_gear_recommendation":
-   - 1 concise sentence (<20 words). Must start with "My prescription: ".
+   - 1 concise sentence (<22 words) with specific gear for their exact activity (e.g. valved sport respirator, wrap-around eyewear). Must start with "My prescription: ".
 5. "commute_advisory":
-   - 1 concise sentence (<20 words) with tactical transit advice for their route.
+   - 1 concise tactical sentence (<22 words) for their specific transit mode.
 6. "indoor_air_advice":
-   - 1 concise sentence (<20 words) for home/bedroom recovery.
+   - 1 concise sentence (<22 words) for indoor recovery.
 7. "profile_summary":
-   - Short clinical title, e.g. "Dr. Care Plan: {req.profile_name or work_name} - Health Shield".
+   - Short clinical title, e.g. "Dr. Care Plan: {work_name} - Health & Performance Shield".
 8. "vulnerability_level":
    - "{vuln}" (or "Low", "Moderate", "High", "Critical").
 
@@ -614,8 +677,7 @@ Respond ONLY with valid JSON matching this schema:
 }}"""
 
         user_prompt = f"""Patient Consultation File:
-- Patient Name / Tag: {req.profile_name}
-- Work / Occupation: {work_name}
+- Patient Work / Role: {work_name}
 - City & AQI: {city_name} (AQI: {aqi_val}, PM2.5: {req.current_pm25} µg/m³)
 - Daily Outdoor Exposure: {req.outdoor_hours} hours/day
 - Commute Mode: {req.commute_mode}
@@ -623,17 +685,17 @@ Respond ONLY with valid JSON matching this schema:
 - Personal Routine Notes: "{user_details}"
 - Inhalation Rate: {inhaled_rate} µg/min, Lung Deposition Fraction: {df}, Assessed Vulnerability: {vuln}
 
-Doctor, provide your concise clinical evaluation and 4 actionable steps in strict JSON.
+Doctor, provide your concise clinical evaluation and 4 hyper-specialized actionable steps in strict JSON.
 CRITICAL CONSTRAINTS:
-1. clinical_evaluation: MUST BE SHORT (maximum 2 sentences, under 35 words!), opening: "As your doctor, looking at your routine as a {work_name} in {city_name} (AQI {aqi_val})..."
+1. clinical_evaluation: MUST BE SHORT (maximum 2 sentences, under 40 words!), opening: "As your doctor, looking at your routine as a {work_name} in {city_name} (AQI {aqi_val})..."
 2. hindi_evaluation: 1-2 caring sentences in Hindi.
-3. personalized_tips: EXACTLY 4 concise, numbered actionable steps:
-   "Step 1: [Title] — [Concise 1-sentence action, 10-18 words max]"
-   "Step 2: [Title] — [Concise 1-sentence action, 10-18 words max]"
-   "Step 3: [Title] — [Concise 1-sentence action, 10-18 words max]"
-   "Step 4: [Title] — [Concise 1-sentence action, 10-18 words max]"
-   Strictly tailor each step to their specific work, commute, and symptoms!
-4. protective_gear_recommendation & commute_advisory: 1 concise sentence (<20 words) each."""
+3. personalized_tips: EXACTLY 4 concise actionable steps:
+   "Step 1: [Title] — [Concise 1-sentence action, 10-22 words]"
+   "Step 2: [Title] — [Concise 1-sentence action, 10-22 words]"
+   "Step 3: [Title] — [Concise 1-sentence action, 10-22 words]"
+   "Step 4: [Title] — [Concise 1-sentence action, 10-22 words]"
+   Zero generic advice. Strictly tailor each step to their specific activity, commute, and health!
+4. protective_gear_recommendation & commute_advisory: 1 concise sentence (<22 words) each."""
 
         try:
             # Check if Gemini key
@@ -743,20 +805,25 @@ CRITICAL CONSTRAINTS:
         has_throat_cough = any(w in text for w in ["throat", "cough", "phlegm", "irritat"])
         is_delivery = any(re.search(rf"\b{re.escape(w)}\b", text) or re.search(rf"\b{re.escape(w)}\b", occ) for w in ["delivery", "courier", "rider", "swiggy", "zomato"])
         is_runner = any(re.search(rf"\b{re.escape(w)}\b", text) or re.search(rf"\b{re.escape(w)}\b", occ) for w in ["runner", "athlete", "running", "jog", "cardio", "marathon"])
+        is_gym = any(re.search(rf"\b{re.escape(w)}\b", text) or re.search(rf"\b{re.escape(w)}\b", occ) for w in ["gym", "lift", "lifter", "workout", "fitness", "bodybuilding", "weights", "strength", "crossfit", "gymrat", "gym rat"])
         is_senior = any(re.search(rf"\b{re.escape(w)}\b", text) or re.search(rf"\b{re.escape(w)}\b", occ) for w in ["senior", "elderly", "retired", "old age", "70 years", "65 years", "grandparent"])
         is_2wheeler = any(re.search(rf"\b{re.escape(w)}\b", commute) or re.search(rf"\b{re.escape(w)}\b", text) for w in ["motorcycle", "bike", "scooter", "motorbike", "2-wheeler", "two-wheeler"])
 
         # Work / Routine description
-        work_desc = req.occupation.strip() if req.occupation and req.occupation not in ("General", "Active Professional") else None
-        if not work_desc and req.profile_text:
-            m_role = re.search(r"(?:work as an?|working as an?|i am an?|occupation:\s*|role:\s*|job:\s*|daily work/routine:\s*)([a-zA-Z\s\-]{3,30}?)(?:\s+(?:in|at|for|commute|outdoors|with)|[,.\n]|$)", req.profile_text, re.IGNORECASE)
-            if m_role:
-                work_desc = m_role.group(1).strip().title()
-        if not work_desc:
+        raw_occ = req.occupation.strip() if req.occupation and req.occupation not in ("General", "Active Professional") else None
+        work_desc = AdvisoryAgent._clean_user_role(raw_occ) if raw_occ else None
+        if not work_desc or work_desc == "Active Individual":
+            if req.profile_text:
+                m_role = re.search(r"(?:work as an?|working as an?|i am an?|occupation:\s*|role:\s*|job:\s*|daily work/routine:\s*)([a-zA-Z\s\-]{3,30}?)(?:\s+(?:in|at|for|commute|outdoors|with)|[,.\n]|$)", req.profile_text, re.IGNORECASE)
+                if m_role:
+                    work_desc = AdvisoryAgent._clean_user_role(m_role.group(1))
+        if not work_desc or work_desc == "Active Individual":
             work_desc = (
-                "Delivery Rider" if is_delivery else (
-                    "Runner / Athlete" if is_runner else (
-                        "Retired Senior" if is_senior else "Active Individual"
+                "Dedicated Gym-Goer / Lifter" if is_gym else (
+                    "Delivery Rider" if is_delivery else (
+                        "Runner / Athlete" if is_runner else (
+                            "Retired Senior" if is_senior else "Active Individual"
+                        )
                     )
                 )
             )
@@ -767,7 +834,7 @@ CRITICAL CONSTRAINTS:
         # Title
         profile_title = f"Dr. Care Plan: {req.profile_name} (Personal Health Shield)" if req.profile_name and req.profile_name != "My Profile" else f"Dr. Care Plan: {work_desc} Health Shield"
 
-        # 1. Clinical Evaluation (English, max 2 sentences, strictly under 35 words!)
+        # 1. Clinical Evaluation (English, max 2 sentences, strictly under 40 words!)
         if has_asthma:
             eval_en = (
                 f"As your doctor, looking at your routine as a {work_desc} in {city} (AQI {aqi}), "
@@ -777,6 +844,14 @@ CRITICAL CONSTRAINTS:
             eval_hi = (
                 f"आपके डॉक्टर के रूप में सलाह है कि {city} में AQI {aqi} के दौरान फेफड़ों की सुरक्षा जरूरी है। "
                 "अपना इनहेलर पास रखें और बाहर N95 मास्क अवश्य पहनें।"
+            )
+        elif is_gym:
+            eval_en = (
+                f"As your doctor, looking at your routine as a {work_desc} in {city} (AQI {aqi}), "
+                "our clinical goal is protecting alveoli from high-ventilation particulate intake and preserving nitric oxide for recovery."
+            )
+            eval_hi = (
+                f"आपके डॉक्टर के रूप में सलाह है कि {city} में AQI {aqi} के दौरान भारी वर्कआउट में फेफड़ों और मांसपेशियों की रिकवरी का ध्यान रखें।"
             )
         elif has_heart or is_senior:
             eval_en = (
@@ -809,10 +884,17 @@ CRITICAL CONSTRAINTS:
                 "जहरीले धुएं से फेफड़ों का बचाव आज सबसे जरूरी है।"
             )
 
-        # 2. Exactly 4 concise actionable steps ("Step X: [Title] — [Action, 10-18 words max]")
+        # 2. Exactly 4 concise actionable steps ("Step X: [Title] — [Action, 10-22 words max]")
         candidate_steps = []
 
-        # Symptom-specific steps first
+        # Gym-specific steps first if gymrat / lifter
+        if is_gym:
+            candidate_steps.append(("Ventilation Pacing", "Extend inter-set rest to 3 minutes on heavy compound lifts to allow exercise hyperpnea to settle."))
+            candidate_steps.append(("Nitric Oxide Defense", "Consume dietary citrulline or beetroot pre-workout to counter pollutant-mediated endothelial vasoconstriction."))
+            candidate_steps.append(("Gym Micro-Zoning", "Train in interior free-weight areas away from open street shutters to avoid vehicular exhaust."))
+            candidate_steps.append(("Glutathione Recovery", "Take 600 mg N-acetylcysteine (NAC) and Vitamin C post-workout to quench lung oxidative stress."))
+
+        # Symptom-specific steps
         if has_eye_issues:
             candidate_steps.append(("Ocular Relief", "Rinse stinging eyes with preservative-free artificial tears every 90 minutes to wash out acidic exhaust."))
         if has_asthma:
