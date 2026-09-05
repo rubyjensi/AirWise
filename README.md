@@ -1,13 +1,14 @@
 # AirWise 🛡️
 > **Atmosphere first. Health guidance second. Detail on demand.**
 
-🌐 **Live Web Application:** [https://airwise-nine.vercel.app](https://airwise-nine.vercel.app)  
-[![Production Deployment](https://img.shields.io/badge/Deployment-Live%20on%20Vercel-black?style=flat&logo=vercel)](https://airwise-nine.vercel.app)
-[![API Status](https://img.shields.io/badge/API-Operational-success?style=flat)](https://airwise-nine.vercel.app/api/health)
+### 🌐 **Live Web Application**: [https://airwise-nine.vercel.app](https://airwise-nine.vercel.app)
 
-AirWise is a calm, glanceable environmental health and exposure intelligence platform.
+[![Live Website](https://img.shields.io/badge/Live_Website-airwise--nine.vercel.app-0070f3?style=for-the-badge&logo=vercel&logoColor=white)](https://airwise-nine.vercel.app)
+[![API Status](https://img.shields.io/badge/API-Operational-success?style=for-the-badge)](https://airwise-nine.vercel.app/api/health)
+[![GitHub Repository](https://img.shields.io/badge/GitHub-rubyjensi%2FAirWise-181717?style=for-the-badge&logo=github)](https://github.com/rubyjensi/AirWise)
 
-Instead of displaying generic AQI badges or overloaded medical dashboards, AirWise translates live atmospheric telemetry into **personalized biological inhalation dosage estimates ($\mu g$)** and discovers **lower-exposure activity windows** to protect respiratory and cardiovascular health.
+> 🔗 **Production Deployment URL**: [https://airwise-nine.vercel.app](https://airwise-nine.vercel.app)  
+> Real-time air quality, biological dosage modeling, bespoke physician pulmonology guidance, and dynamic low-exposure activity scheduling.
 
 ---
 
@@ -44,8 +45,8 @@ Instead of displaying generic AQI badges or overloaded medical dashboards, AirWi
 ### 1. Clone & Setup
 ```bash
 # Clone the repository
-git clone <repo-url>
-cd radiant-bose
+git clone https://github.com/rubyjensi/AirWise.git
+cd AirWise
 
 # Setup virtual environment and install dependencies
 uv venv
