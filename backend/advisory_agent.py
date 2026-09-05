@@ -1,7 +1,7 @@
 import os
 import re
 import json
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import httpx
 from dotenv import load_dotenv
 
@@ -378,26 +378,34 @@ Output strict JSON with these keys:
         clean_role = AdvisoryAgent._clean_user_role(work_name)
         expected_prefix = f"As your doctor, looking at your routine as a {clean_role} in {city_name} (AQI {aqi_val})"
 
-        # Clean any clumsy "as a i am a" patterns
-        text = re.sub(r"as\s+a\s+i\s+am\s+a\b", f"as a {clean_role}", text, flags=re.IGNORECASE)
-        text = re.sub(r"as\s+a\s+i'm\s+a\b", f"as a {clean_role}", text, flags=re.IGNORECASE)
+        # Strip whatever preamble the AI wrote up to (AQI ...) or comma/colon to guarantee 100% clean opening
+        m = re.search(r"\((?:AQI\s*\d+|AQI\s*\(?\d+\)?)\)[,\s]*(.*)$", text, re.IGNORECASE | re.DOTALL)
+        if m and m.group(1).strip() and len(m.group(1).strip()) > 8:
+            cleaned_body = m.group(1).strip()
+        else:
+            cleaned_body = re.sub(
+                r"^as\s+your\s+doctor.*?(?:in\s+[a-zA-Z\s]+(?:\([^\)]*\))?|routine[^\n,.]*)[,.:;]\s*",
+                "",
+                text,
+                flags=re.IGNORECASE | re.DOTALL,
+            ).strip()
 
-        # Ensure required opening phrase
-        if not text.lower().startswith("as your doctor, looking at your routine as a"):
-            if text.lower().startswith("as your doctor"):
-                text = f"{expected_prefix}, " + text[len("as your doctor"):].lstrip(",.:; ")
-            else:
-                text = f"{expected_prefix}, {text}"
+        # Clean any remaining "as a i am a" or "as a i'm a" artifacts
+        cleaned_body = re.sub(r"\bas\s+an?\s+i\s+am\s+an?\b", f"as a {clean_role}", cleaned_body, flags=re.IGNORECASE)
+        cleaned_body = re.sub(r"\bas\s+an?\s+i'm\s+an?\b", f"as a {clean_role}", cleaned_body, flags=re.IGNORECASE)
+        cleaned_body = re.sub(r"\bi\s+am\s+a\s+gymrat\b", clean_role, cleaned_body, flags=re.IGNORECASE)
+
+        text = f"{expected_prefix}, {cleaned_body}".strip()
 
         # Keep maximum 2 sentences
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
         if len(sentences) > 2:
             text = " ".join(sentences[:2])
 
-        # Gracefully trim if extremely long, but NEVER discard AI output
+        # Gracefully trim if extremely long (max 38 words)
         words = text.split()
-        if len(words) > 42:
-            text = " ".join(words[:42]).rstrip(",;:-") + "."
+        if len(words) > 38:
+            text = " ".join(words[:38]).rstrip(",;:-") + "."
 
         return text
 
@@ -406,7 +414,7 @@ Output strict JSON with these keys:
         text: str,
         fallback_text: str,
         prefix: str = "",
-        max_words: int = 22,
+        max_words: int = 18,
     ) -> str:
         if not text or not isinstance(text, str) or len(text.strip()) < 5:
             return fallback_text
@@ -416,11 +424,379 @@ Output strict JSON with these keys:
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
         if sentences:
             text = sentences[0]
-        # Gracefully trim rather than discarding to fallback
+        # Strictly trim to max_words
         words = text.split()
-        if len(words) > max_words + 10:
-            text = " ".join(words[:max_words + 10]).rstrip(",;:-") + "."
+        if len(words) > max_words:
+            text = " ".join(words[:max_words]).rstrip(",;:-") + "."
         return text
+
+    @staticmethod
+    def _build_persona_faqs_and_questions(
+        work_name: str,
+        is_gym: bool,
+        is_runner: bool,
+        is_delivery: bool,
+        is_senior: bool,
+        has_asthma: bool,
+        city: str,
+        aqi: int,
+    ) -> Tuple[List[Dict[str, str]], List[Dict[str, Any]]]:
+        """Builds hyper-personalized FAQs and interactive check-in questions for the patient's specific persona."""
+        if is_gym:
+            faqs = [
+                {
+                    "question": f"Can I still hit heavy PRs and compound lifts when AQI is {aqi}?",
+                    "answer": "Yes, but keep sets in the 3–5 rep range with 3+ minute rest intervals. This prevents sustained oral hyperventilation (>60 L/min) that forces ultrafine particles deep into alveolar tissue.",
+                },
+                {
+                    "question": "Does my gym's air conditioning protect me from PM2.5?",
+                    "answer": "Standard commercial ACs only cool and recirculate indoor air—they do NOT capture sub-micron soot unless fitted with standalone MERV 13+ or True HEPA filters. Train in the interior free-weight zone away from open street doors.",
+                },
+                {
+                    "question": "Should I take pre-workout vasodilators in polluted air?",
+                    "answer": "High-stimulant pre-workouts spike respiration rate. Swap for dietary nitrates (70ml beetroot juice) or 6g L-citrulline, which sustain endothelial nitric oxide (NO) blunted by particulate pollution.",
+                },
+                {
+                    "question": "What is the best post-workout detox stack for lifters?",
+                    "answer": "Ingest 600mg N-Acetylcysteine (NAC) with 500mg Vitamin C in your post-workout shake to directly replenish lung glutathione stores depleted by inhaled oxidants.",
+                },
+            ]
+            questions = [
+                {
+                    "id": "gym_env",
+                    "category": "Gym Environment & Air Exchange",
+                    "question": "Where does your heaviest workout or lifting session happen?",
+                    "options": [
+                        {
+                            "label": "Basement Gym",
+                            "insight": "Basements often lack external exhaust, recirculating chalk dust and rubber mat VOCs. Position yourself near central return air ducts and avoid doing cardio downstairs.",
+                        },
+                        {
+                            "label": "Commercial Floor Gym",
+                            "insight": "Check if street-facing rollups or doors are left open. Train in interior free-weight sections at least 10 meters back from the main entrance.",
+                        },
+                        {
+                            "label": "Open-Air / Park Gym",
+                            "insight": "Open-air workouts force raw ambient soot inhalation during heavy sets. Strictly align your training with today's lower-exposure window.",
+                        },
+                        {
+                            "label": "Home Setup",
+                            "insight": "Optimal for air control! Run a portable HEPA filter 30 minutes before your workout to bring indoor PM2.5 under 10 µg/m³ before heavy breathing starts.",
+                        },
+                    ],
+                },
+                {
+                    "id": "gym_symptoms",
+                    "category": "Intra-Workout Sensations",
+                    "question": "Do you notice any of these sensations during or after training?",
+                    "options": [
+                        {
+                            "label": "Dry / scratchy throat",
+                            "insight": "Laryngeal irritation from acidic aerosol particles during hyperpnea. Gargle warm saline post-workout and sip water between every set.",
+                        },
+                        {
+                            "label": "Burning eyes / headache",
+                            "insight": "Exhaust soot strips tear film lipids and triggers frontal tension. Wash your eyes with cool saline and keep wrap-around eyewear for your commute.",
+                        },
+                        {
+                            "label": "Chest tightness on heavy sets",
+                            "insight": "Exercise-induced micro-bronchospasm from particulate deposition. Extend rest periods to 3+ minutes and drop high-rep dropsets.",
+                        },
+                        {
+                            "label": "Feeling 100% strong & fine",
+                            "insight": "Excellent cardiopulmonary reserve! Sub-clinical alveolar deposition still occurs, so maintain your antioxidant and beetroot juice recovery.",
+                        },
+                    ],
+                },
+                {
+                    "id": "gym_timing",
+                    "category": "Training Schedule Pacing",
+                    "question": "What time of day do you usually hit your heaviest sets?",
+                    "options": [
+                        {
+                            "label": "Early Morning (6–8 AM)",
+                            "insight": "Winter mornings frequently trap pollution near the ground due to temperature inversion. If possible, push outdoor warmup later or train indoors.",
+                        },
+                        {
+                            "label": "Midday (12–3 PM)",
+                            "insight": "Ground PM2.5 disperses with solar convection, but photochemical ozone peaks. Keep training indoors in air-conditioned space.",
+                        },
+                        {
+                            "label": "Evening (6–8 PM)",
+                            "insight": "Usually aligns with the daily lower-exposure dispersion window before the night inversion settles. Ideal timing for lifting.",
+                        },
+                        {
+                            "label": "Late Night (9–11 PM)",
+                            "insight": "Night boundary cooling traps heavy truck diesel particulate. Keep gym windows sealed and use indoor recirculation.",
+                        },
+                    ],
+                },
+                {
+                    "id": "gym_stack",
+                    "category": "Pulmonary Recovery Nutrition",
+                    "question": "What does your post-workout nutrition or stack look like?",
+                    "options": [
+                        {
+                            "label": "Whey Protein + Creatine",
+                            "insight": "Great foundation! Add 600mg NAC and 500mg Vitamin C to this shake—cysteine acts as the rate-limiting precursor to restore lung glutathione.",
+                        },
+                        {
+                            "label": "Heavy Whole-Food Meal",
+                            "insight": "Incorporate sulfur-rich foods (eggs, garlic, broccoli) and citrus fruits to naturally boost glutathione synthesis and counter airway stress.",
+                        },
+                        {
+                            "label": "Pre-Workout / Energy Drinks",
+                            "insight": "High caffeine spikes respiratory rate and minute ventilation. Counter this with dietary nitrates (beetroot juice) to protect endothelial vasodilation.",
+                        },
+                        {
+                            "label": "Just Water / Hydration",
+                            "insight": "Essential for mucociliary clearance! Add an electrolyte pinch and consider an effervescent Vitamin C tablet during high-AQI days.",
+                        },
+                    ],
+                },
+            ]
+        elif is_runner:
+            faqs = [
+                {
+                    "question": f"Can I run outdoors if AQI is around {aqi}?",
+                    "answer": "Shift your run to the lower-exposure window and keep pace strictly in Zone 2 to maintain nasal breathing. Anaerobic intervals force mouth breathing, bypassing your nasal filter.",
+                },
+                {
+                    "question": "Does running with a sports respirator restrict oxygen intake?",
+                    "answer": "Modern dual-valved sport respirators maintain full arterial oxygen saturation while capturing 95%+ of sub-micron particulates.",
+                },
+                {
+                    "question": "How long does lung inflammation persist after a polluted outdoor run?",
+                    "answer": "Neutrophilic airway inflammation peaks 4–6 hours post-run. Taking NAC (600mg) and doing gentle steam inhalation accelerates mucociliary clearance.",
+                },
+                {
+                    "question": "Should I treadmill run instead of road running today?",
+                    "answer": "Yes—treadmill running in an air-conditioned, HEPA-filtered space lowers particulate intake by 75–85% compared to roadside running.",
+                },
+            ]
+            questions = [
+                {
+                    "id": "run_route",
+                    "category": "Running Route & Air Currents",
+                    "question": "Where does your typical running route take you?",
+                    "options": [
+                        {
+                            "label": "Main Arterial Roads",
+                            "insight": "Roadside running exposes you to fresh diesel exhaust plumes at tailpipe level. Relocate into inner residential sectors or green parks.",
+                        },
+                        {
+                            "label": "Interior Colony Lanes",
+                            "insight": "Better than main roads, but watch for early morning leaf-burning or localized trash smoke. Choose well-ventilated avenues.",
+                        },
+                        {
+                            "label": "City Park / Forest Track",
+                            "insight": "Dense tree canopies trap and filter particulates. Run along central trails away from the park's road boundaries.",
+                        },
+                        {
+                            "label": "Indoor Treadmill",
+                            "insight": "The clinically safest choice on high-AQI days. Ensure the gym or room has a functional HEPA filter running nearby.",
+                        },
+                    ],
+                },
+                {
+                    "id": "run_sensation",
+                    "category": "Airway Response & Endurance",
+                    "question": "How do your lungs feel during the final kilometer?",
+                    "options": [
+                        {
+                            "label": "Burning in the chest",
+                            "insight": "Indicates acute ozone and acid aerosol airway burn. Drop your target pace by 30-45 sec/km to bring respiration back into nasal range.",
+                        },
+                        {
+                            "label": "Dry tickling cough",
+                            "insight": "Sign of tracheal particulate impingement. Rinse mouth and gargle immediately, and take 600mg NAC with your post-run fluid.",
+                        },
+                        {
+                            "label": "Leg fatigue only",
+                            "insight": "Great aerobic threshold! Your pulmonary defense is holding well. Maintain post-run hydration with electrolytes.",
+                        },
+                        {
+                            "label": "Clear & strong",
+                            "insight": "Superb cardiovascular conditioning. Keep monitoring the daily lower-exposure window for your speedwork sessions.",
+                        },
+                    ],
+                },
+            ]
+        elif is_delivery:
+            faqs = [
+                {
+                    "question": "How much more pollution do I inhale on a two-wheeler than in a car?",
+                    "answer": "Two-wheeler riders inhale 4–6x more elemental soot because they ride directly in the exhaust plume of heavy vehicles at tailpipe height.",
+                },
+                {
+                    "question": "How can I prevent sweat and moisture buildup under my mask?",
+                    "answer": "Switch to an exhalation-valved respirator (e.g. 3M 9004V or silicone half-mask). The one-way valve vents exhaled moisture and drops interior temperature.",
+                },
+                {
+                    "question": "Does keeping my helmet visor down protect my lungs?",
+                    "answer": "A visor protects your eyes and tear film from acidic sulfates, but does not filter air. Always pair a closed visor with a sealed valved respirator.",
+                },
+                {
+                    "question": "Where at traffic signals is particulate matter most concentrated?",
+                    "answer": "Directly behind idling diesel trucks and buses where exhaust pools. Stop 5 meters back near the side kerb where airflow is cleaner.",
+                },
+            ]
+            questions = [
+                {
+                    "id": "delivery_shift",
+                    "category": "Road Exposure Duration",
+                    "question": "How many hours are you actively on the road during your shift?",
+                    "options": [
+                        {
+                            "label": "2–4 Hours",
+                            "insight": "Moderate cumulative dose. Carry two clean N95 masks so you can switch halfway through if sweat reduces breathability.",
+                        },
+                        {
+                            "label": "5–8 Hours",
+                            "insight": "High cumulative particulate intake. A valved respirator is crucial to prevent respiratory fatigue. Take 10-minute rest breaks inside air-conditioned hubs.",
+                        },
+                        {
+                            "label": "8+ Hours",
+                            "insight": "Critical exposure tier. Wash eyes with lubricating drops mid-shift and keep a reusable valved silicone half-mask (3M 6500QL) for maximum seal.",
+                        },
+                    ],
+                },
+                {
+                    "id": "delivery_eyes",
+                    "category": "Eye & Throat Protection",
+                    "question": "Do you notice gritty eyes or hoarse voice after your shift?",
+                    "options": [
+                        {
+                            "label": "Yes, gritty / red eyes",
+                            "insight": "Diesel exhaust acidifies tear film. Never rub eyes with gloves; rinse with saline drops immediately at the end of your shift.",
+                        },
+                        {
+                            "label": "Yes, hoarse voice / cough",
+                            "insight": "Vocal cord irritation from breathing road exhaust. Drink warm water during deliveries and keep exhalation valve clean.",
+                        },
+                        {
+                            "label": "Mild discomfort",
+                            "insight": "Ensure your mask seal has zero bridge leaks fogging your visor, which indicates unfiltered air bypass.",
+                        },
+                        {
+                            "label": "No issues",
+                            "insight": "Good resilience! Continue sealing your mask tightly over your nose bridge during congested peak traffic.",
+                        },
+                    ],
+                },
+            ]
+        elif has_asthma:
+            faqs = [
+                {
+                    "question": "Should I take preventative puffs before stepping outside?",
+                    "answer": "Yes. Taking 2 preventative puffs of your prescribed bronchodilator 15 minutes prior to outdoor transit blunts particulate-induced airway smooth muscle spasm.",
+                },
+                {
+                    "question": f"Why does smog in {city} trigger wheezing even with moderate AQI?",
+                    "answer": "Synergistic exposure to nitrogen dioxide (NO2) and fine particles hyper-sensitizes bronchial C-fibers, significantly lowering your spasm threshold.",
+                },
+                {
+                    "question": "How can I tell if my airway inflammation is escalating?",
+                    "answer": "Watch for a persistent dry nocturnal tickle, needing rescue inhaler more than twice today, or prolonged recovery after climbing stairs.",
+                },
+                {
+                    "question": "Is it safe to exercise indoors without an air purifier?",
+                    "answer": "Indoor PM2.5 typically reaches 50–70% of outdoor levels. Run a True-HEPA purifier in your exercise room to keep levels below 15 µg/m³.",
+                },
+            ]
+            questions = [
+                {
+                    "id": "asthma_trigger",
+                    "category": "Respiratory Sensitivity Check",
+                    "question": "What environmental factor triggers your tightness fastest?",
+                    "options": [
+                        {
+                            "label": "Cold morning air + smog",
+                            "insight": "Cold air causes reflex bronchospasm while smog acidifies mucus. Wear a warm scarf over your N95 mask to pre-warm inhaled air.",
+                        },
+                        {
+                            "label": "Diesel exhaust / traffic smoke",
+                            "insight": "Sulfates and black carbon provoke immediate neurogenic inflammation. Keep your rescue inhaler in an easily accessible pocket.",
+                        },
+                        {
+                            "label": "Indoor dust / incense / cooking",
+                            "insight": "Indoor combustion compounds outdoor PM2.5. Run your kitchen chimney on max and keep bedroom purifier running on continuous auto.",
+                        },
+                        {
+                            "label": "Sudden exertion or stairs",
+                            "insight": "Pre-warm your lungs with slow diaphragmatic breathing and take prescribed preventative inhalers as advised by your physician.",
+                        },
+                    ],
+                },
+            ]
+        else:
+            faqs = [
+                {
+                    "question": f"Is indoor air in {city} really cleaner than outside?",
+                    "answer": "In typical apartments without purifiers, 40–70% of outdoor PM2.5 penetrates inside, while indoor CO2 builds up. Run a True-HEPA purifier and ventilate only during the low-exposure window.",
+                },
+                {
+                    "question": f"When is the safest time for outdoor errands in {city} today?",
+                    "answer": "Align your transit with today's recommended lower-exposure window when surface ventilation peaks and atmospheric stagnation briefly lifts.",
+                },
+                {
+                    "question": "Can air pollution cause afternoon fatigue and brain fog?",
+                    "answer": "Yes. Ultrafine particles (<0.1 µm) cross into the bloodstream and olfactory nerves, promoting systemic inflammation and reducing cerebral oxygenation.",
+                },
+                {
+                    "question": "What simple dietary habits protect lung tissue against pollution?",
+                    "answer": "Cruciferous vegetables (broccoli, cabbage) stimulate the cellular Nrf2 antioxidant pathway, while dietary Vitamin C and citrus bioflavonoids protect mucosal linings.",
+                },
+            ]
+            questions = [
+                {
+                    "id": "gen_workplace",
+                    "category": "Daily Routine & Workplace Air",
+                    "question": "Where do you spend the majority of your daytime hours?",
+                    "options": [
+                        {
+                            "label": "Air-Conditioned Office",
+                            "insight": "Check indoor CO2 levels; stagnant office air can cause brain fog. Take brief stepping breaks away from parking exhaust vents.",
+                        },
+                        {
+                            "label": "Home with Windows Closed",
+                            "insight": "Good baseline protection. Add a portable True-HEPA purifier in your primary work/sleep room to drop PM2.5 to single digits.",
+                        },
+                        {
+                            "label": "Mixed Transit & Outdoor Visits",
+                            "insight": "Your cumulative inhaled dose fluctuates sharply. Wear a comfortable N95 respirator during roadside walking and auto transit.",
+                        },
+                        {
+                            "label": "Industrial / Open-Air Space",
+                            "insight": "High exposure risk. Pair an industrial N95 respirator with wrap-around safety glasses to protect both lungs and tear film.",
+                        },
+                    ],
+                },
+                {
+                    "id": "gen_symptoms",
+                    "category": "Daily Symptom Self-Check",
+                    "question": "Are you experiencing any pollution-related sensations today?",
+                    "options": [
+                        {
+                            "label": "Stinging eyes or sinus fullness",
+                            "insight": "Acidic particulate deposition on mucous membranes. Wash face with cool filtered water and use preservative-free artificial tears.",
+                        },
+                        {
+                            "label": "Scratchy throat or dry cough",
+                            "insight": "Pharyngeal particulate irritation. Sip warm herbal fluids or gargle mild saline before sleeping to rinse trapped soot.",
+                        },
+                        {
+                            "label": "Drowsiness & light headache",
+                            "insight": "Vascular response to elevated carbon monoxide and particulate spikes. Drink water and step into a HEPA-purified room.",
+                        },
+                        {
+                            "label": "Feeling clear and energized",
+                            "insight": "Excellent vitality! Maintain your proactive air quality pacing and schedule outdoor activities within the recommended window.",
+                        },
+                    ],
+                },
+            ]
+        return faqs, questions
 
     @staticmethod
     def _normalize_steps(
@@ -516,27 +892,34 @@ Output strict JSON with these keys:
         raw_tips = raw_dict.get("personalized_tips", [])
         tips = AdvisoryAgent._normalize_steps(raw_tips, det_eval.personalized_tips)
 
-        # 4. protective_gear_recommendation: 1 concise sentence (<20 words)
+        # 4. protective_gear_recommendation: 1 concise sentence (<18 words)
         gear = AdvisoryAgent._clean_short_sentence(
             raw_dict.get("protective_gear_recommendation", ""),
             det_eval.protective_gear_recommendation,
             prefix="My prescription:",
-            max_words=20,
+            max_words=17,
         )
 
-        # 5. commute_advisory: 1 concise sentence (<20 words)
+        # 5. commute_advisory: 1 concise sentence (<18 words)
         commute_adv = AdvisoryAgent._clean_short_sentence(
             raw_dict.get("commute_advisory", ""),
             det_eval.commute_advisory,
-            max_words=20,
+            max_words=17,
         )
 
-        # 6. indoor_air_advice: 1 concise sentence (<20 words)
+        # 6. indoor_air_advice: 1 concise sentence (<18 words)
         indoor = AdvisoryAgent._clean_short_sentence(
             raw_dict.get("indoor_air_advice", ""),
             det_eval.indoor_air_advice,
-            max_words=20,
+            max_words=17,
         )
+
+        # 7. personalized_faqs and routine_questions
+        raw_faqs = raw_dict.get("personalized_faqs")
+        faqs = raw_faqs if isinstance(raw_faqs, list) and len(raw_faqs) > 0 else (det_eval.personalized_faqs or [])
+
+        raw_questions = raw_dict.get("routine_questions")
+        questions = raw_questions if isinstance(raw_questions, list) and len(raw_questions) > 0 else (det_eval.routine_questions or [])
 
         return ProfileEvaluationResponse(
             profile_summary=summary,
@@ -552,6 +935,8 @@ Output strict JSON with these keys:
             protective_gear_recommendation=gear,
             indoor_air_advice=indoor,
             commute_advisory=commute_adv,
+            personalized_faqs=faqs,
+            routine_questions=questions,
         )
 
     @staticmethod
@@ -967,6 +1352,18 @@ CRITICAL CONSTRAINTS:
         # 5. Doctor's Indoor Air Advice (<20 words)
         indoor = "Run a True-HEPA purifier in your bedroom to keep PM2.5 below 10 µg/m³ while sleeping."
 
+        # 6. Personalized FAQs & Routine Check-in Questions
+        faqs, questions = AdvisoryAgent._build_persona_faqs_and_questions(
+            work_name=work_desc,
+            is_gym=is_gym,
+            is_runner=is_runner,
+            is_delivery=is_delivery,
+            is_senior=is_senior,
+            has_asthma=has_asthma,
+            city=city,
+            aqi=aqi,
+        )
+
         return ProfileEvaluationResponse(
             profile_summary=profile_title,
             vulnerability_level=vuln,
@@ -981,4 +1378,6 @@ CRITICAL CONSTRAINTS:
             protective_gear_recommendation=gear,
             indoor_air_advice=indoor,
             commute_advisory=commute_adv,
+            personalized_faqs=faqs,
+            routine_questions=questions,
         )

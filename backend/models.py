@@ -149,3 +149,5 @@ class ProfileEvaluationResponse(BaseModel):
     protective_gear_recommendation: str
     indoor_air_advice: str
     commute_advisory: str
+    personalized_faqs: Optional[List[Dict[str, str]]] = Field(default_factory=list)
+    routine_questions: Optional[List[Dict[str, Any]]] = Field(default_factory=list)

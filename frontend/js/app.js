@@ -191,6 +191,9 @@ function renderApp(dataOverride, isUserAction = false) {
     console.log('Scrubbed to hour:', selectedHour.hour_display, selectedHour.aqi);
   });
 
+  // Update Personalized Plan Screen (FAQs & Routine Check-in)
+  updatePlanView(d);
+
   // Update QR Code with current URL
   if (qrImageEl) {
     const currentUrl = window.location.href;
@@ -201,11 +204,16 @@ function renderApp(dataOverride, isUserAction = false) {
   updateAirQualityMap(d);
 }
 
-// Leaflet Air Quality Radar Map (MSN Weather Style)
+// Leaflet Air Quality Radar Map & Continuous Heatmap
 let leafletMap = null;
 let stationMarkersGroup = null;
 let userMarker = null;
 let atmosphericHeatCircle = null;
+let heatLayer = null;
+let waqiTileLayer = null;
+let isHeatmapActive = true;
+let isStationsActive = true;
+let isWaqiRadarActive = false;
 
 function getAqiHexColor(aqi) {
   if (aqi <= 50) return '#2ea043';
@@ -249,6 +257,7 @@ function initAirQualityMap() {
 
   stationMarkersGroup = L.layerGroup().addTo(leafletMap);
 
+  // Map Controls: Recenter, Zoom In/Out
   document.getElementById('mapRecenterBtn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     if (leafletMap && state.homeData) {
@@ -265,6 +274,52 @@ function initAirQualityMap() {
     e.stopPropagation();
     if (leafletMap) leafletMap.zoomOut();
   });
+
+  // Map Layer Controls (Heatmap, Stations, WAQI Radar)
+  const toggleHeatmapBtn = document.getElementById('toggleHeatmapBtn');
+  if (toggleHeatmapBtn) {
+    toggleHeatmapBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      isHeatmapActive = !isHeatmapActive;
+      toggleHeatmapBtn.classList.toggle('active', isHeatmapActive);
+      if (heatLayer && leafletMap) {
+        if (isHeatmapActive) leafletMap.addLayer(heatLayer);
+        else leafletMap.removeLayer(heatLayer);
+      }
+    });
+  }
+
+  const toggleStationsBtn = document.getElementById('toggleStationsBtn');
+  if (toggleStationsBtn) {
+    toggleStationsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      isStationsActive = !isStationsActive;
+      toggleStationsBtn.classList.toggle('active', isStationsActive);
+      if (stationMarkersGroup && leafletMap) {
+        if (isStationsActive) leafletMap.addLayer(stationMarkersGroup);
+        else leafletMap.removeLayer(stationMarkersGroup);
+      }
+    });
+  }
+
+  const toggleWaqiRadarBtn = document.getElementById('toggleWaqiRadarBtn');
+  if (toggleWaqiRadarBtn) {
+    toggleWaqiRadarBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      isWaqiRadarActive = !isWaqiRadarActive;
+      toggleWaqiRadarBtn.classList.toggle('active', isWaqiRadarActive);
+      if (!waqiTileLayer) {
+        waqiTileLayer = L.tileLayer('https://tiles.aqicn.org/tiles/usepa-aqi/{z}/{x}/{y}.png', {
+          maxZoom: 16,
+          opacity: 0.72
+        });
+      }
+      if (leafletMap) {
+        if (isWaqiRadarActive) leafletMap.addLayer(waqiTileLayer);
+        else leafletMap.removeLayer(waqiTileLayer);
+      }
+    });
+  }
 
   setTimeout(() => {
     if (leafletMap) leafletMap.invalidateSize();
@@ -312,17 +367,78 @@ function updateAirQualityMap(d) {
     userMarker.bindTooltip("You are here", { direction: 'top', offset: [0, -8] });
   }
 
-  // Atmospheric Dispersion Plume Overlay (MSN Weather Style)
+  // Generate 2D Continuous AQI Heatmap Mesh (Leaflet.heat)
+  const heatPoints = [];
+  const baseIntensity = Math.min(1.0, Math.max(0.20, aqi / 240.0));
+  heatPoints.push([lat, lon, baseIntensity]);
+
+  // Atmospheric multi-ring dispersion model
+  const dispersionRings = [0.014, 0.032, 0.058, 0.092, 0.135];
+  dispersionRings.forEach((rDeg, idx) => {
+    const ptCount = 8 + idx * 3;
+    const falloff = Math.max(0.12, baseIntensity * Math.pow(0.72, idx + 1));
+    for (let i = 0; i < ptCount; i++) {
+      const angle = (i * 2 * Math.PI) / ptCount;
+      const pLat = lat + Math.sin(angle) * rDeg;
+      const pLon = lon + Math.cos(angle) * rDeg;
+      heatPoints.push([pLat, pLon, falloff]);
+    }
+  });
+
+  // Nearby monitoring stations
+  if (stationMarkersGroup) {
+    stationMarkersGroup.clearLayers();
+  }
+
+  const stations = d.nearby_stations || [];
+  stations.forEach((st) => {
+    const stIntensity = Math.min(1.0, Math.max(0.20, st.aqi / 240.0));
+    heatPoints.push([st.lat, st.lon, stIntensity]);
+    // Micro station dispersion nodes
+    const microRad = 0.016;
+    for (let k = 0; k < 6; k++) {
+      const a = (k * 2 * Math.PI) / 6;
+      heatPoints.push([st.lat + Math.sin(a) * microRad, st.lon + Math.cos(a) * microRad, stIntensity * 0.85]);
+    }
+  });
+
+  // Build / update L.heatLayer
+  if (heatLayer && leafletMap) {
+    leafletMap.removeLayer(heatLayer);
+    heatLayer = null;
+  }
+
+  if (typeof L !== 'undefined' && typeof L.heatLayer === 'function') {
+    heatLayer = L.heatLayer(heatPoints, {
+      radius: 42,
+      blur: 32,
+      maxZoom: 15,
+      max: 1.0,
+      minOpacity: 0.38,
+      gradient: {
+        0.12: '#2ea043',
+        0.32: '#d29922',
+        0.52: '#db6d28',
+        0.72: '#f85149',
+        0.88: '#bc8cff',
+        1.00: '#8c1d40'
+      }
+    });
+    if (isHeatmapActive) {
+      heatLayer.addTo(leafletMap);
+    }
+  }
+
+  // Plume boundary ring
   if (atmosphericHeatCircle) {
     leafletMap.removeLayer(atmosphericHeatCircle);
   }
-
   const plumeColor = getAqiHexColor(aqi);
   atmosphericHeatCircle = L.circle([lat, lon], {
-    radius: 14000,
+    radius: 16000,
     color: plumeColor,
     fillColor: plumeColor,
-    fillOpacity: 0.16,
+    fillOpacity: 0.08,
     weight: 1.5,
     dashArray: '4, 6'
   }).addTo(leafletMap);
@@ -1335,6 +1451,316 @@ function updatePersonalExposureCard(d) {
   if (doseLabel) doseLabel.textContent = 'PM2.5 equivalent mortality risk (Berkeley Earth Model)';
 }
 
+// Personalized Plan View Engine (Persona FAQs & Interactive Check-in)
+let currentPlanQuestionIdx = 0;
+let activePlanQuestions = [];
+let activePlanFaqs = [];
+
+const PLAN_KNOWLEDGE_BASE = {
+  gym: {
+    roleName: "Dedicated Gym-Goer / Lifter",
+    windowAdvice: "Ideal window for your lifting session: ambient particulate levels drop and ground inversion lifts, reducing alveolar strain during heavy sets.",
+    questions: [
+      {
+        category: "Gym Environment & Air Exchange",
+        question: "Where does your heaviest lifting or exercise session take place?",
+        options: [
+          { label: "Basement Gym", insight: "Basements often lack external exhaust, recirculating chalk dust and rubber VOCs. Train near return air ducts and avoid cardio downstairs." },
+          { label: "Commercial Floor Gym", insight: "Keep away from street-facing doors left propped open during peak traffic. Train in interior free-weight areas." },
+          { label: "Open-Air / Park Gym", insight: "Open air forces raw ambient soot inhalation during heavy sets. Strictly align training with today's lower-exposure window." },
+          { label: "Home Purified Setup", insight: "Optimal air control! Run your HEPA filter 30 min before training to bring indoor PM2.5 under 10 µg/m³ before hyperpnea." }
+        ]
+      },
+      {
+        category: "Intra-Workout Sensations",
+        question: "Do you notice any of these sensations during or after training?",
+        options: [
+          { label: "Dry / scratchy throat", insight: "Laryngeal irritation from acidic aerosol particles during hyperpnea. Gargle warm saline post-session and sip water between sets." },
+          { label: "Burning eyes / headache", insight: "Exhaust soot strips tear film lipids. Wash eyes with cool saline and keep wrap-around glasses on your commute." },
+          { label: "Chest tightness on heavy sets", insight: "Exercise-induced micro-bronchospasm from particulate deposition. Extend rest periods to 3+ minutes and drop high-rep dropsets." },
+          { label: "Feeling 100% strong & fine", insight: "Great cardiopulmonary reserve! Sub-clinical alveolar deposition still occurs, so maintain your antioxidant and beetroot juice recovery." }
+        ]
+      },
+      {
+        category: "Training Schedule Pacing",
+        question: "What time of day do you usually hit your heaviest sets?",
+        options: [
+          { label: "Early Morning (6–8 AM)", insight: "Winter mornings trap surface pollution due to temperature inversion. If possible, push outdoor warmup later or train indoors." },
+          { label: "Midday (12–3 PM)", insight: "Ground PM2.5 disperses with solar convection, but ozone peaks. Keep workouts indoors in air-conditioned space." },
+          { label: "Evening (6–8 PM)", insight: "Usually aligns with the daily lower-exposure dispersion window before the night inversion settles. Ideal timing for lifting." },
+          { label: "Late Night (9–11 PM)", insight: "Night boundary cooling traps heavy diesel exhaust. Keep gym windows sealed and use indoor recirculation." }
+        ]
+      },
+      {
+        category: "Pulmonary Recovery Nutrition",
+        question: "What does your post-workout nutrition or stack look like?",
+        options: [
+          { label: "Whey Protein + Creatine", insight: "Great foundation! Add 600mg NAC and 500mg Vitamin C to this shake—cysteine acts as the rate-limiting precursor to restore lung glutathione." },
+          { label: "Heavy Whole-Food Meal", insight: "Incorporate sulfur-rich foods (eggs, garlic, broccoli) and citrus fruits to naturally boost glutathione synthesis and counter airway stress." },
+          { label: "Pre-Workout / Energy Drinks", insight: "High caffeine spikes respiratory rate. Counter this with dietary nitrates (beetroot juice) to protect endothelial vasodilation." },
+          { label: "Just Water / Hydration", insight: "Essential for mucociliary clearance! Add an electrolyte pinch and consider an effervescent Vitamin C tablet during high-AQI days." }
+        ]
+      }
+    ],
+    faqs: [
+      {
+        question: "Can I still hit heavy PRs and compound lifts when AQI is elevated?",
+        answer: "Yes, but keep sets in the 3–5 rep range with 3+ minute rest intervals. This prevents sustained oral hyperventilation (>60 L/min) that forces ultrafine particles deep into alveolar tissue."
+      },
+      {
+        question: "Does my gym's air conditioning protect me from PM2.5?",
+        answer: "Standard commercial ACs only cool and recirculate indoor air—they do NOT capture sub-micron soot unless fitted with standalone MERV 13+ or True HEPA filters. Train in the interior free-weight zone away from open street doors."
+      },
+      {
+        question: "Should I take pre-workout vasodilators in polluted air?",
+        answer: "High-stimulant pre-workouts spike respiration rate. Swap for dietary nitrates (70ml beetroot juice) or 6g L-citrulline, which sustain endothelial nitric oxide (NO) blunted by particulate pollution."
+      },
+      {
+        question: "What is the best post-workout detox stack for lifters?",
+        answer: "Ingest 600mg N-Acetylcysteine (NAC) with 500mg Vitamin C in your post-workout shake to directly replenish lung glutathione stores depleted by inhaled oxidants."
+      }
+    ]
+  },
+  runner: {
+    roleName: "Runner / Outdoor Athlete",
+    windowAdvice: "Prime aerobic window: air is at its lowest daily particulate density, enabling nasal-breathing Zone 2 training with minimum airway irritation.",
+    questions: [
+      {
+        category: "Running Route & Air Currents",
+        question: "Where does your typical running route take you?",
+        options: [
+          { label: "Main Arterial Roads", insight: "Roadside running exposes you to fresh diesel exhaust plumes at tailpipe level. Relocate into inner residential sectors or green parks." },
+          { label: "Interior Colony Lanes", insight: "Better than main roads, but watch for early morning leaf-burning or localized trash smoke. Choose well-ventilated avenues." },
+          { label: "City Park / Forest Track", insight: "Dense tree canopies trap and filter particulates. Run along central trails away from the park's road boundaries." },
+          { label: "Indoor Treadmill", insight: "The clinically safest choice on high-AQI days. Ensure the gym or room has a functional HEPA filter running nearby." }
+        ]
+      },
+      {
+        category: "Airway Response & Endurance",
+        question: "How do your lungs feel during the final kilometer?",
+        options: [
+          { label: "Burning in the chest", insight: "Indicates acute ozone and acid aerosol airway burn. Drop your target pace by 30-45 sec/km to bring respiration back into nasal range." },
+          { label: "Dry tickling cough", insight: "Sign of tracheal particulate impingement. Rinse mouth and gargle immediately, and take 600mg NAC with your post-run fluid." },
+          { label: "Leg fatigue only", insight: "Great aerobic threshold! Your pulmonary defense is holding well. Maintain post-run hydration with electrolytes." },
+          { label: "Clear & strong", insight: "Superb cardiovascular conditioning. Keep monitoring the daily lower-exposure window for your speedwork sessions." }
+        ]
+      }
+    ],
+    faqs: [
+      {
+        question: "Can I run outdoors if AQI is elevated?",
+        answer: "Shift your run to the lower-exposure window and keep pace strictly in Zone 2 to maintain nasal breathing. Anaerobic intervals force mouth breathing, bypassing your nasal filter."
+      },
+      {
+        question: "Does running with a sports respirator restrict oxygen intake?",
+        answer: "Modern dual-valved sport respirators maintain full arterial oxygen saturation while capturing 95%+ of sub-micron particulates."
+      },
+      {
+        question: "How long does lung inflammation persist after an outdoor run?",
+        answer: "Neutrophilic airway inflammation peaks 4–6 hours post-run. Taking NAC (600mg) and doing gentle steam inhalation accelerates mucociliary clearance."
+      }
+    ]
+  },
+  delivery: {
+    roleName: "Delivery Rider / Commuter",
+    windowAdvice: "Low-exposure dispatch window: scheduling heavier road transit now avoids the worst peak traffic diesel plumes.",
+    questions: [
+      {
+        category: "Road Exposure Duration",
+        question: "How many hours are you actively on the road during your shift?",
+        options: [
+          { label: "2–4 Hours", insight: "Moderate cumulative dose. Carry two clean N95 masks so you can switch halfway through if sweat reduces breathability." },
+          { label: "5–8 Hours", insight: "High cumulative particulate intake. A valved respirator is crucial to prevent respiratory fatigue. Take 10-minute rest breaks inside air-conditioned hubs." },
+          { label: "8+ Hours", insight: "Critical exposure tier. Wash eyes with lubricating drops mid-shift and keep a reusable valved silicone half-mask (3M 6500QL) for maximum seal." }
+        ]
+      },
+      {
+        category: "Eye & Throat Protection",
+        question: "Do you notice gritty eyes or hoarse voice after your shift?",
+        options: [
+          { label: "Yes, gritty / red eyes", insight: "Diesel exhaust acidifies tear film. Never rub eyes with gloves; rinse with saline drops immediately at the end of your shift." },
+          { label: "Yes, hoarse voice / cough", insight: "Vocal cord irritation from breathing road exhaust. Drink warm water during deliveries and keep exhalation valve clean." },
+          { label: "No issues", insight: "Good resilience! Continue sealing your mask tightly over your nose bridge during congested peak traffic." }
+        ]
+      }
+    ],
+    faqs: [
+      {
+        question: "How much more pollution do I inhale on a two-wheeler than in a car?",
+        answer: "Two-wheeler riders inhale 4–6x more elemental soot because they ride directly in the exhaust plume of heavy vehicles at tailpipe height."
+      },
+      {
+        question: "How can I prevent sweat and moisture buildup under my mask?",
+        answer: "Switch to an exhalation-valved respirator (e.g. 3M 9004V or silicone half-mask). The one-way valve vents exhaled moisture and drops interior temperature."
+      }
+    ]
+  },
+  general: {
+    roleName: "Active Routine",
+    windowAdvice: "Recommended outdoor window: surface ventilation peaks and atmospheric stagnation briefly lifts for safer errands and transit.",
+    questions: [
+      {
+        category: "Daily Routine & Workplace Air",
+        question: "Where do you spend the majority of your daytime hours?",
+        options: [
+          { label: "Air-Conditioned Office", insight: "Check indoor CO2 levels; stagnant office air can cause brain fog. Take brief stepping breaks away from parking exhaust vents." },
+          { label: "Home with Windows Closed", insight: "Good baseline protection. Add a portable True-HEPA purifier in your primary work/sleep room to drop PM2.5 to single digits." },
+          { label: "Mixed Transit & Outdoor Visits", insight: "Your cumulative inhaled dose fluctuates sharply. Wear a comfortable N95 respirator during roadside walking and auto transit." },
+          { label: "Open-Air / Industrial Space", insight: "High exposure risk. Pair an industrial N95 respirator with wrap-around safety glasses to protect both lungs and tear film." }
+        ]
+      },
+      {
+        category: "Daily Symptom Self-Check",
+        question: "Are you experiencing any pollution-related sensations today?",
+        options: [
+          { label: "Stinging eyes or sinus fullness", insight: "Acidic particulate deposition on mucous membranes. Wash face with cool filtered water and use preservative-free artificial tears." },
+          { label: "Scratchy throat or dry cough", insight: "Pharyngeal particulate irritation. Sip warm herbal fluids or gargle mild saline before sleeping to rinse trapped soot." },
+          { label: "Feeling clear and energized", insight: "Excellent vitality! Maintain your proactive air quality pacing and schedule outdoor activities within the recommended window." }
+        ]
+      }
+    ],
+    faqs: [
+      {
+        question: "Is indoor air really cleaner than outside?",
+        answer: "In typical apartments without purifiers, 40–70% of outdoor PM2.5 penetrates inside, while indoor CO2 builds up. Run a True-HEPA purifier and ventilate only during the low-exposure window."
+      },
+      {
+        question: "Can air pollution cause afternoon fatigue and brain fog?",
+        answer: "Yes. Ultrafine particles (<0.1 µm) cross into the bloodstream and olfactory nerves, promoting systemic inflammation and reducing cerebral oxygenation."
+      },
+      {
+        question: "What simple dietary habits protect lung tissue against pollution?",
+        answer: "Cruciferous vegetables (broccoli, cabbage) stimulate the cellular Nrf2 antioxidant pathway, while dietary Vitamin C and citrus bioflavonoids protect mucosal linings."
+      }
+    ]
+  }
+};
+
+function updatePlanView(d) {
+  const saved = localStorage.getItem('airwise_profile');
+  let p = null;
+  if (saved) {
+    try { p = JSON.parse(saved); } catch (e) {}
+  }
+
+  const roleText = (p && (p.work || p.occupation || p.profile_text)) ? (p.work || p.occupation || p.profile_text).toLowerCase() : '';
+  let personaKey = 'general';
+  if (roleText.includes('gym') || roleText.includes('lift') || roleText.includes('workout') || roleText.includes('fitness') || roleText.includes('bodybuild') || roleText.includes('gymrat')) {
+    personaKey = 'gym';
+  } else if (roleText.includes('run') || roleText.includes('jog') || roleText.includes('marathon') || roleText.includes('athlete')) {
+    personaKey = 'runner';
+  } else if (roleText.includes('deliver') || roleText.includes('rider') || roleText.includes('bike') || roleText.includes('motorcycle') || roleText.includes('swiggy') || roleText.includes('zomato')) {
+    personaKey = 'delivery';
+  }
+
+  const config = PLAN_KNOWLEDGE_BASE[personaKey] || PLAN_KNOWLEDGE_BASE['general'];
+
+  // Update Persona Ribbon
+  const ribbonEl = document.getElementById('planPersonaRibbon');
+  const ribbonTextEl = document.getElementById('planPersonaText');
+  if (ribbonEl && ribbonTextEl) {
+    if (p && (p.work || p.occupation)) {
+      const cleanName = (p.work || p.occupation).replace(/^i\s+am\s+a\s+/i, '').replace(/^i'm\s+a\s+/i, '');
+      const displayRole = cleanName.toLowerCase().includes('gym') ? 'Dedicated Gym-Goer / Lifter' : cleanName;
+      ribbonTextEl.textContent = `Calibrated for ${displayRole}`;
+      ribbonEl.style.display = 'inline-flex';
+    } else {
+      ribbonTextEl.textContent = 'Calibrated for Active Routine';
+      ribbonEl.style.display = 'inline-flex';
+    }
+  }
+
+  // Personalize Recommended Window Reason if available
+  const planReasonEl = document.getElementById('planReason');
+  if (planReasonEl && config.windowAdvice) {
+    planReasonEl.textContent = config.windowAdvice;
+  }
+
+  // Populate Questions
+  activePlanQuestions = (p && p.routine_questions && p.routine_questions.length > 0) ? p.routine_questions : config.questions;
+  renderPlanQuestion();
+
+  // Populate FAQs
+  activePlanFaqs = (p && p.personalized_faqs && p.personalized_faqs.length > 0) ? p.personalized_faqs : config.faqs;
+  renderPlanFaqs();
+}
+
+function renderPlanQuestion() {
+  if (!activePlanQuestions || activePlanQuestions.length === 0) return;
+  const q = activePlanQuestions[currentPlanQuestionIdx % activePlanQuestions.length];
+
+  const catEl = document.getElementById('planQuestionCategory');
+  const titleEl = document.getElementById('planQuestionText');
+  const optContainer = document.getElementById('planQuestionOptions');
+  const insightBox = document.getElementById('planDoctorInsight');
+
+  if (catEl) catEl.textContent = q.category || 'Routine & Environment';
+  if (titleEl) titleEl.textContent = q.question;
+  if (insightBox) insightBox.style.display = 'none';
+
+  if (optContainer && q.options) {
+    optContainer.innerHTML = q.options.map((opt, i) => {
+      const label = typeof opt === 'string' ? opt : opt.label;
+      return `<button class="plan-option-chip" onclick="selectPlanOption(${i})">${label}</button>`;
+    }).join('');
+  }
+}
+
+function selectPlanOption(optIndex) {
+  if (!activePlanQuestions || activePlanQuestions.length === 0) return;
+  const q = activePlanQuestions[currentPlanQuestionIdx % activePlanQuestions.length];
+  if (!q.options || !q.options[optIndex]) return;
+
+  const chips = document.querySelectorAll('.plan-option-chip');
+  chips.forEach((c, idx) => {
+    c.classList.toggle('selected', idx === optIndex);
+  });
+
+  const opt = q.options[optIndex];
+  const insight = typeof opt === 'string' ? 'Your feedback helps calibrate lower-exposure windows.' : opt.insight;
+  const insightBox = document.getElementById('planDoctorInsight');
+  const textEl = document.getElementById('planInsightText');
+  if (insightBox && textEl) {
+    textEl.textContent = insight;
+    insightBox.style.display = 'block';
+  }
+}
+
+function shufflePlanQuestion() {
+  if (!activePlanQuestions || activePlanQuestions.length <= 1) return;
+  currentPlanQuestionIdx = (currentPlanQuestionIdx + 1) % activePlanQuestions.length;
+  renderPlanQuestion();
+}
+
+function renderPlanFaqs() {
+  const container = document.getElementById('planFaqAccordion');
+  const countPill = document.getElementById('faqCountPill');
+  if (!container || !activePlanFaqs || activePlanFaqs.length === 0) return;
+
+  if (countPill) countPill.textContent = `${activePlanFaqs.length} Q&As`;
+
+  container.innerHTML = activePlanFaqs.map((f, idx) => `
+    <div class="faq-item ${idx === 0 ? 'open' : ''}">
+      <button class="faq-question-btn" onclick="toggleFaqItem(this.parentElement)">
+        <span class="faq-question-text">${f.question}</span>
+        <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="faq-answer-pane">
+        <div class="faq-answer-content">${f.answer}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleFaqItem(faqEl) {
+  if (!faqEl) return;
+  const isOpen = faqEl.classList.contains('open');
+  document.querySelectorAll('.faq-item').forEach(item => item.classList.remove('open'));
+  if (!isOpen) {
+    faqEl.classList.add('open');
+  }
+}
+
 function loadSavedProfile() {
   const saved = localStorage.getItem('airwise_profile');
   if (saved) {
@@ -1374,3 +1800,7 @@ window.openProfileModal = openProfileModal;
 window.closeProfileModal = closeProfileModal;
 window.refreshProfileForLocation = refreshProfileForLocation;
 window.updatePersonalExposureCard = updatePersonalExposureCard;
+window.shufflePlanQuestion = shufflePlanQuestion;
+window.selectPlanOption = selectPlanOption;
+window.toggleFaqItem = toggleFaqItem;
+window.updatePlanView = updatePlanView;
